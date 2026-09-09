@@ -33,9 +33,46 @@
 
 **解决：** 在远程执行 `git reset --hard origin/main` 强制同步到 GitHub 远端状态，再 `git pull` 拉取最新代码。
 
-**待确认：** 等待 `git reset + pull` 执行完成后，运行训练脚本看 NPU 训练结果。
+**结果：** ✅ 成功跑完，NPU 训练结果正常！
 
-#### 3. 技术要点总结
+```
+模型: y = 2.0114 * x + 0.9796
+真实: y = 2.0 * x + 1.0
+Loss 收敛至 0.2145
+```
+
+#### 3. 解决 GitHub 权限问题 + 切换到新仓库
+
+**问题：** 本地 git push 遇到 `Permission to Lattenot/agent_benchmark_test.git denied to ada-yy1325`（403），macOS keychain 缓存的凭据没有权限 push 到原仓库。
+
+**解决：** 
+1. 在 `ada-yy1325` 账号下新建公开仓库 `agent_benchmark_03`
+2. 本地 remote URL 改为 `https://github.com/ada-yy1325/agent_benchmark_03.git`
+3. 清除 macOS keychain 缓存的凭据 → 重新登录验证
+4. `git push -u origin main --force` 推送成功（远程初始 commit 被覆盖）
+
+**远程同步：** 通过 `inspire notebook exec` 更新远程机器的 origin URL：
+```bash
+inspire notebook exec inspire-demo --workspace 昇腾卡公共空间 \
+  "cd /inspire/.../agent_benchmark_test && \
+   git remote set-url origin https://github.com/ada-yy1325/agent_benchmark_03.git && \
+   git fetch origin && git reset --hard origin/main && \
+   python3 train_linear_regression.py"
+```
+
+#### 4. 整条自动化链路验证通过 🎉
+
+**最终执行结果：**
+- **NPU 设备**: ASCEND 910B2C ✅
+- **torch_npu**: 2.11.0.rc4 ✅
+- **训练结果**: 500 epoch，Loss 0.2145，权重/偏置接近真实值
+- **完整链路**: 本地写代码 → git push → inspire exec → 远程 NPU 执行 → 返回结果
+
+**`.clinerules` 更新：**
+- 将远程执行命令从 `git pull` 改为 `git fetch origin && git reset --hard origin/main`，避免因远程分支分叉导致 pull 失败
+- 新增 GitHub 仓库 URL 字段
+
+#### 5. 技术要点总结
 
 | 项目 | 说明 |
 |------|------|
