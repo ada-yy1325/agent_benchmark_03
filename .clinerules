@@ -5,13 +5,14 @@
 - 工作空间：昇腾卡公共空间
 - 项目：公共科研项目
 - 远程代码路径：/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test
+- GitHub 仓库：https://github.com/ada-yy1325/agent_benchmark_03.git
 - 显卡：ASCEND 910B（昇腾 NPU，不是 NVIDIA GPU）
 - Python：3.13，PyTorch 2.11 + torch_npu
 
 ## 工作流程
 1. 在本地修改代码后，先 git add / commit / push 到 GitHub
 2. 然后用这个命令在远程拉取并执行：
-   inspire notebook exec inspire-demo --workspace 昇腾卡公共空间 "cd /inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test && git pull && python3 <脚本名>"
+   inspire notebook exec inspire-demo --workspace 昇腾卡公共空间 "cd /inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test && git fetch origin && git reset --hard origin/main && python3 <脚本名>"
 3. 根据远程返回的输出继续调试
 4. 查看 NPU 指标用：inspire notebook metrics inspire-demo --workspace 昇腾卡公共空间
 5. 进入交互终端用：inspire notebook shell inspire-demo --workspace 昇腾卡公共空间
