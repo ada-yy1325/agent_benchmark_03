@@ -1,5 +1,5 @@
 # =============================================================================
-# Qwen3-14B-Instruct 官方评测复现 —— 严格对照技术报告 Section 4.6
+# Qwen3-14B 官方评测复现 —— 严格对照技术报告 Section 4.6
 # 官方来源：Qwen3 Technical Report (arXiv:2505.09388), Section 4.6 Post-training Evaluation
 # 官方分数：Table 15 (思考模式) / Table 16 (非思考模式)
 # PDF: https://arxiv.org/pdf/2505.09388
@@ -7,7 +7,7 @@
 # =============================================================================
 
 meta:
-  model: "Qwen/Qwen3-14B-Instruct"
+  model: "Qwen/Qwen3-14B"
   report: "Qwen3 Technical Report"
   arxiv: "2505.09388"
   section: "4.6 Post-training Evaluation"
@@ -22,14 +22,14 @@ meta:
 # =============================================================================
 model:
   model_id: "Qwen3-14B"
-  full_name: "Qwen/Qwen3-14B-Instruct"
-  download_hf: "https://huggingface.co/Qwen/Qwen3-14B-Instruct"
-  download_modelscope: "https://modelscope.cn/models/Qwen/Qwen3-14B-Instruct"
+  full_name: "Qwen/Qwen3-14B"
+  download_hf: "https://huggingface.co/Qwen/Qwen3-14B"
+  download_modelscope: "https://modelscope.cn/models/Qwen/Qwen3-14B"
 
 deployment:
   engine: "vLLM-Ascend"
   start_command: |
-    vllm serve ./models/Qwen3-14B-Instruct \
+    vllm serve ./models/Qwen3-14B \
       --served-model-name Qwen3-14B \
       --port 8801 \
       --gpu-memory-utilization 0.9 \
