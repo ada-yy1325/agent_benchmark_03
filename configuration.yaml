@@ -1,0 +1,468 @@
+# =============================================================================
+# Qwen3-14B-Instruct 官方评测复现 —— 严格对照技术报告 Section 4.6
+# 官方来源：Qwen3 Technical Report (arXiv:2505.09388), Section 4.6 Post-training Evaluation
+# 官方分数：Table 15 (思考模式) / Table 16 (非思考模式)
+# PDF: https://arxiv.org/pdf/2505.09388
+# 注意：Instruct 评测全部 0-shot，和 Base 模型的 15 基准(few-shot)完全不同
+# =============================================================================
+
+meta:
+  model: "Qwen/Qwen3-14B-Instruct"
+  report: "Qwen3 Technical Report"
+  arxiv: "2505.09388"
+  section: "4.6 Post-training Evaluation"
+  official_score_table: "Table 15 (thinking) / Table 16 (non-thinking)"
+  pdf_url: "https://arxiv.org/pdf/2505.09388"
+  shot_config: "全部 0-shot（官方未提及 few-shot）"
+  total_official_benchmarks: 22
+  evalscope_runnable: 8
+
+# =============================================================================
+# 模型与部署
+# =============================================================================
+model:
+  model_id: "Qwen3-14B"
+  full_name: "Qwen/Qwen3-14B-Instruct"
+  download_hf: "https://huggingface.co/Qwen/Qwen3-14B-Instruct"
+  download_modelscope: "https://modelscope.cn/models/Qwen/Qwen3-14B-Instruct"
+
+deployment:
+  engine: "vLLM-Ascend"
+  start_command: |
+    vllm serve ./models/Qwen3-14B-Instruct \
+      --served-model-name Qwen3-14B \
+      --port 8801 \
+      --gpu-memory-utilization 0.9 \
+      --trust-remote-code \
+      --max-model-len 65536 \
+      --device npu
+  api_url: "http://127.0.0.1:8801/v1/chat/completions"
+  eval_type: "openai_api"
+
+# =============================================================================
+# 官方解码参数（Section 4.6 最后一段明确列出，逐字对照）
+# =============================================================================
+decoding:
+  thinking_mode:
+    temperature: 0.6        # 官方：sampling temperature of 0.6
+    top_p: 0.95             # 官方：top-p value of 0.95
+    top_k: 20               # 官方：top-k value of 20
+    max_tokens: 32768       # 官方：max output length to 32,768 tokens
+    max_tokens_aime: 38912  # 官方：AIME'24/25 extend to 38,912 tokens
+    presence_penalty: 1.5   # 官方：仅 Creative Writing v3 和 WritingBench
+    thinking_filter:
+      remove_until: "</think>"
+
+  non_thinking_mode:
+    temperature: 0.7        # 官方：temperature = 0.7
+    top_p: 0.8              # 官方：top-p = 0.8
+    top_k: 20               # 官方：top-k = 20
+    max_tokens: 32768       # 官方：max output length to 32,768 tokens
+    max_tokens_aime: 38912
+    presence_penalty: 1.5   # 官方：presence penalty = 1.5
+    enable_thinking: false
+    enable_thinking_config:
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
+
+active_mode: "thinking_mode"
+
+# =============================================================================
+# 官方 22 个基准完整列表（Section 4.6，逐字对照）
+# 标注：EvalScope 是否支持 / 官方特殊配置
+# =============================================================================
+official_all_benchmarks:
+
+  # ===== General Tasks（官方原文）=====
+  general_tasks:
+    - name: "MMLU-Redux"
+      citation: "Gema et al., 2024"
+      evalscope_supported: true
+      evalscope_dataset: "mmlu_redux"
+      special_config: "无"
+
+    - name: "GPQA-Diamond"
+      citation: "Rein et al., 2023"
+      evalscope_supported: true
+      evalscope_dataset: "gpqa_diamond"
+      special_config: "官方：sample 10 times for each query, report averaged accuracy"
+      official_n: 10
+
+    - name: "C-Eval"
+      citation: "Huang et al., 2023"
+      evalscope_supported: true
+      evalscope_dataset: "ceval"
+      special_config: "无"
+
+    - name: "LiveBench (2024-11-25)"
+      citation: "White et al., 2024"
+      evalscope_supported: false
+      special_config: "指定日期版本 2024-11-25"
+
+  # ===== Alignment Tasks（官方原文）=====
+  alignment_tasks:
+    - name: "IFEval"
+      citation: "Zhou et al., 2023"
+      evalscope_supported: true
+      evalscope_dataset: "ifeval"
+      special_config: "官方：report strict-prompt accuracy"
+      metric: "prompt_level_strict_acc"
+
+    - name: "Arena-Hard"
+      citation: "Li et al., 2024"
+      evalscope_supported: false
+      reason: "需要裁判模型（GPT-4等）"
+
+    - name: "AlignBench v1.1"
+      citation: "Liu et al., 2023b"
+      evalscope_supported: false
+      reason: "需要裁判模型，中文对齐基准"
+
+    - name: "Creative Writing V3"
+      citation: "Paech, 2024"
+      evalscope_supported: false
+      reason: "需要裁判模型评分；官方用 presence_penalty=1.5"
+
+    - name: "WritingBench"
+      citation: "Wu et al., 2025"
+      evalscope_supported: false
+      reason: "需要裁判模型评分；官方用 presence_penalty=1.5"
+
+  # ===== Math & Text Reasoning（官方原文）=====
+  math_reasoning:
+    - name: "MATH-500"
+      citation: "Lightman et al., 2023"
+      evalscope_supported: true
+      evalscope_dataset: "math_500"
+      special_config: "无"
+
+    - name: "AIME'24"
+      citation: "AIME, 2025"
+      evalscope_supported: true
+      evalscope_dataset: "aime24"
+      special_config: "官方：30题(Part I+II)，每题 sample 64 times，取平均准确率"
+      official_n: 64
+      max_tokens: 38912
+
+    - name: "AIME'25"
+      citation: "AIME, 2025"
+      evalscope_supported: true
+      evalscope_dataset: "aime25"
+      special_config: "官方：30题(Part I+II)，每题 sample 64 times，取平均准确率"
+      official_n: 64
+      max_tokens: 38912
+
+    - name: "ZebraLogic"
+      citation: "Lin et al., 2025"
+      evalscope_supported: false
+      reason: "较新基准，EvalScope 暂不支持"
+
+    - name: "AutoLogi"
+      citation: "Zhu et al., 2025"
+      evalscope_supported: false
+      reason: "较新基准，EvalScope 暂不支持"
+
+  # ===== Agent & Coding（官方原文）=====
+  agent_coding:
+    - name: "BFCL v3"
+      citation: "Yan et al., 2024"
+      evalscope_supported: false
+      special_config: "官方：FC格式，yarn部署到64k上下文，多轮评估"
+      reason: "工具调用基准，EvalScope 不直接支持"
+
+    - name: "LiveCodeBench v5"
+      citation: "Jain et al., 2024"
+      evalscope_supported: true
+      evalscope_dataset: "live_code_bench"
+      special_config: |
+        官方：v5, 时间范围 2024.10-2025.02
+        非思考模式：用官方推荐 prompt
+        思考模式：调整 prompt 模板，移除 "You will not return anything except for the program" 限制
+      evalscope_args:
+        subset_list: ["v5"]
+        extra_params:
+          start_date: "2024-10-01"
+          end_date: "2025-02-28"
+
+    - name: "CodeForces (CodeElo)"
+      citation: "Quan et al., 2025"
+      evalscope_supported: false
+      special_config: "官方：每题最多 8 次独立推理尝试，计算 ELO 评分"
+      reason: "需要竞赛编程环境，EvalScope 不直接支持"
+
+  # ===== Multilingual Tasks（官方原文）=====
+  multilingual:
+    - name: "Multi-IF"
+      citation: "He et al., 2024"
+      evalscope_supported: false
+      langs: 8
+      reason: "多语言指令遵循，EvalScope 不直接支持"
+
+    - name: "INCLUDE"
+      citation: "Romanou et al., 2024"
+      evalscope_supported: false
+      langs: 44
+      special_config: "官方：只采样 10% 原始数据"
+      reason: "EvalScope 不直接支持"
+
+    - name: "MMMLU"
+      citation: "OpenAI, 2024"
+      evalscope_supported: true
+      evalscope_dataset: "mmmlu"
+      langs: 14
+      special_config: "官方：14种语言，排除约鲁巴语(Yoruba)，只采样 10% 数据"
+      note: "EvalScope 默认跑全量，如需严格对齐官方需手动采样 10%"
+
+    - name: "MT-AIME2024"
+      citation: "Son et al., 2025"
+      evalscope_supported: false
+      langs: 55
+      reason: "多语言数学，EvalScope 不直接支持"
+
+    - name: "PolyMath"
+      citation: "Wang et al., 2025"
+      evalscope_supported: false
+      langs: 18
+      reason: "多语言数学，EvalScope 不直接支持"
+
+    - name: "MlogiQA"
+      citation: "Zhang et al., 2024"
+      evalscope_supported: false
+      langs: 10
+      reason: "多语言逻辑推理，EvalScope 不直接支持"
+
+# =============================================================================
+# EvalScope 可跑的 8 个基准（精简执行列表）
+# 筛选条件：官方有分数 + EvalScope 支持 + 不需要额外裁判模型/环境
+# =============================================================================
+runnable_benchmarks:
+
+  - name: "MMLU-Redux"
+    category: "General Tasks"
+    evalscope_dataset: "mmlu_redux"
+    metric: "accuracy"
+    shot: 0
+    official_n: 1
+    max_tokens: 32768
+    official_score_thinking: null   # 查表15填写
+    official_score_non_thinking: null  # 查表16填写
+
+  - name: "GPQA-Diamond"
+    category: "General Tasks"
+    evalscope_dataset: "gpqa_diamond"
+    metric: "accuracy"
+    shot: 0
+    official_n: 10    # 官方采样10次；先跑n=1，成本低
+    max_tokens: 32768
+    official_score_thinking: null
+    official_score_non_thinking: null
+
+  - name: "C-Eval"
+    category: "General Tasks"
+    evalscope_dataset: "ceval"
+    metric: "accuracy"
+    shot: 0
+    official_n: 1
+    max_tokens: 32768
+    official_score_thinking: null
+    official_score_non_thinking: null
+
+  - name: "IFEval"
+    category: "Alignment Tasks"
+    evalscope_dataset: "ifeval"
+    metric: "prompt_level_strict_acc"  # 官方：strict-prompt accuracy
+    shot: 0
+    official_n: 1
+    max_tokens: 32768
+    official_score_thinking: null
+    official_score_non_thinking: null
+
+  - name: "MATH-500"
+    category: "Math & Text Reasoning"
+    evalscope_dataset: "math_500"
+    metric: "AveragePass@1"
+    shot: 0
+    official_n: 1
+    max_tokens: 32768
+    official_score_thinking: null
+    official_score_non_thinking: null
+
+  - name: "AIME'24"
+    category: "Math & Text Reasoning"
+    evalscope_dataset: "aime24"
+    metric: "AveragePass@1"
+    shot: 0
+    official_n: 64   # 官方采样64次；先跑n=1
+    max_tokens: 38912  # 官方：AIME 扩展到 38912
+    official_score_thinking: null
+    official_score_non_thinking: null
+
+  - name: "AIME'25"
+    category: "Math & Text Reasoning"
+    evalscope_dataset: "aime25"
+    metric: "AveragePass@1"
+    shot: 0
+    official_n: 64
+    max_tokens: 38912
+    official_score_thinking: null
+    official_score_non_thinking: null
+
+  - name: "LiveCodeBench v5"
+    category: "Agent & Coding"
+    evalscope_dataset: "live_code_bench"
+    metric: "Pass@1"
+    shot: 0
+    official_n: 1
+    max_tokens: 32768
+    evalscope_args:
+      subset_list: ["v5"]
+      extra_params:
+        start_date: "2024-10-01"
+        end_date: "2025-02-28"
+    official_note: "思考模式需调整 prompt 模板，移除'只能返回程序'限制"
+    official_score_thinking: null
+    official_score_non_thinking: null
+
+# =============================================================================
+# 执行代码
+# =============================================================================
+execution:
+  run_thinking_mode: |
+    """
+    思考模式跑 8 个基准
+    官方参数：temp=0.6, top_p=0.95, top_k=20
+    AIME 用 max_tokens=38912，其余 32768
+    必须加 filters: {'remove_until': '</think>'}
+    """
+    from evalscope import TaskConfig, run_task
+
+    BENCHMARKS = [
+        # (dataset, extra_args, max_tokens, display_name)
+        ("mmlu_redux", {}, 32768, "MMLU-Redux"),
+        ("gpqa_diamond", {}, 32768, "GPQA-Diamond"),
+        ("ceval", {}, 32768, "C-Eval"),
+        ("ifeval", {}, 32768, "IFEval"),
+        ("math_500", {}, 32768, "MATH-500"),
+        ("aime24", {}, 38912, "AIME'24"),
+        ("aime25", {}, 38912, "AIME'25"),
+        ("live_code_bench",
+         {"subset_list": ["v5"],
+          "extra_params": {"start_date": "2024-10-01", "end_date": "2025-02-28"}},
+         32768, "LiveCodeBench v5"),
+    ]
+
+    for dataset, extra_args, max_tokens, name in BENCHMARKS:
+        print(f"\n{'='*50}")
+        print(f"[Thinking] Running: {name}")
+        print(f"{'='*50}")
+
+        dataset_args = {
+            dataset: {
+                'filters': {'remove_until': '</think>'},  # 官方思考模式必须过滤
+            }
+        }
+        dataset_args[dataset].update(extra_args)
+
+        task_cfg = TaskConfig(
+            model='Qwen3-14B',
+            api_url='http://127.0.0.1:8801/v1/chat/completions',
+            eval_type='openai_api',
+            datasets=[dataset],
+            dataset_args=dataset_args,
+            eval_batch_size=8,
+            generation_config={
+                'max_tokens': max_tokens,
+                'temperature': 0.6,   # 官方
+                'top_p': 0.95,        # 官方
+                'top_k': 20,          # 官方
+                'n': 1,               # 官方 GPQA=10, AIME=64；先跑 n=1
+            },
+            timeout=120000,
+            stream=True,
+            # limit=20,  # 测试时打开
+        )
+        run_task(task_cfg=task_cfg)
+
+  run_non_thinking_mode: |
+    """
+    非思考模式跑 8 个基准
+    官方参数：temp=0.7, top_p=0.8, top_k=20
+    通过 extra_body 关闭思考模式
+    """
+    from evalscope import TaskConfig, run_task
+
+    BENCHMARKS = [
+        ("mmlu_redux", {}, 32768, "MMLU-Redux"),
+        ("gpqa_diamond", {}, 32768, "GPQA-Diamond"),
+        ("ceval", {}, 32768, "C-Eval"),
+        ("ifeval", {}, 32768, "IFEval"),
+        ("math_500", {}, 32768, "MATH-500"),
+        ("aime24", {}, 38912, "AIME'24"),
+        ("aime25", {}, 38912, "AIME'25"),
+        ("live_code_bench",
+         {"subset_list": ["v5"],
+          "extra_params": {"start_date": "2024-10-01", "end_date": "2025-02-28"}},
+         32768, "LiveCodeBench v5"),
+    ]
+
+    for dataset, extra_args, max_tokens, name in BENCHMARKS:
+        print(f"\n{'='*50}")
+        print(f"[Non-thinking] Running: {name}")
+        print(f"{'='*50}")
+
+        dataset_args = {dataset: extra_args}  # 非思考模式不需要过滤
+
+        task_cfg = TaskConfig(
+            model='Qwen3-14B',
+            api_url='http://127.0.0.1:8801/v1/chat/completions',
+            eval_type='openai_api',
+            datasets=[dataset],
+            dataset_args=dataset_args,
+            eval_batch_size=16,
+            generation_config={
+                'max_tokens': max_tokens,
+                'temperature': 0.7,   # 官方
+                'top_p': 0.8,         # 官方
+                'top_k': 20,          # 官方
+                'n': 1,
+                'extra_body': {
+                    'chat_template_kwargs': {'enable_thinking': False}  # 官方关闭思考
+                },
+            },
+            timeout=120000,
+            stream=True,
+        )
+        run_task(task_cfg=task_cfg)
+
+# =============================================================================
+# 官方分数核对清单（你翻 PDF 表15/16 后填）
+# =============================================================================
+official_score_checklist:
+  pdf: "https://arxiv.org/pdf/2505.09388"
+  thinking_table: "Table 15: Qwen3-30B-A3B / Qwen3-14B (Thinking)"
+  non_thinking_table: "Table 16: Qwen3-30B-A3B / Qwen3-14B (Non-thinking)"
+  find_qwen3_14b_column: "在表中找到 Qwen3-14B 列，把分数填入 runnable_benchmarks 的 official_score 字段"
+
+  benchmarks_to_fill:
+    - "MMLU-Redux"
+    - "GPQA-Diamond"
+    - "C-Eval"
+    - "IFEval (strict prompt)"
+    - "MATH-500"
+    - "AIME'24"
+    - "AIME'25"
+    - "LiveCodeBench"
+
+# =============================================================================
+# 注意事项（对照官方内容确认）
+# =============================================================================
+important_notes:
+  - "Instruct 评测全部 0-shot，不要加 few_shot_num（和 Base 模型的 15 基准不同）"
+  - "思考模式必须加 filters: {'remove_until': '</think>'}，过滤思考过程只评最终答案"
+  - "AIME'24/25 的 max_tokens 必须用 38912，不是 32768（官方明确说扩展）"
+  - "GPQA 官方是 n=10 采样平均，AIME 官方是 n=64 采样平均；先跑 n=1 成本低，分数会偏低属正常"
+  - "LiveCodeBench 思考模式官方调整了 prompt 模板（移除'只能返回程序'限制），EvalScope 默认 prompt 可能不完全一致"
+  - "MMMLU 官方只采样 10% 数据，EvalScope 默认跑全量，分数可能有差异"
+  - "presence_penalty=1.5 只用于 Creative Writing V3 和 WritingBench，这两个 EvalScope 跑不了，所以你的配置里不需要加"
+  - "BFCL v3 需要 64k 上下文 + FC 格式，EvalScope 不支持，需用官方 harness"
