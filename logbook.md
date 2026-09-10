@@ -72,17 +72,105 @@ inspire notebook exec inspire-demo --workspace 昇腾卡公共空间 \
 - 将远程执行命令从 `git pull` 改为 `git fetch origin && git reset --hard origin/main`，避免因远程分支分叉导致 pull 失败
 - 新增 GitHub 仓库 URL 字段
 
-#### 5. 技术要点总结
+#### 5. InspireSkill 连接昇腾 910B 实例的故障排查（完整记录）
 
-| 项目 | 说明 |
-|------|------|
-| 远程平台 | 启智平台昇腾 910B |
-| 管理命令 | `inspire notebook exec` / `shell` / `metrics` / `save-image` |
-| NPU 监控 | `npu-smi info`（不是 nvidia-smi） |
-| 数据持久化 | 必须放 `/inspire/` 共享盘 |
-| 代码同步 | 本地 GitHub push → 远程 git pull |
+**背景：** InspireSkill 默认适配 NVIDIA GPU，连接 910B 昇腾 NPU 实例时会遇到一系列问题。以下是逐一排查和解决的完整过程。
 
 ---
+
+> **问题 3：网页创建的实例无法通过 InspireSkill 连接**
+>
+> **现象：** 自己在启智网页端创建的 910B 实例，运行 `connection refresh` 完全卡住无输出。
+>
+> **原因：** InspireSkill 对非自己创建的实例拿不到完整连接句柄；且 910B 页面结构可能与 NVIDIA 卡不同。
+>
+> **解决：** 用 InspireSkill 自己创建实例，不要用网页创建。
+>
+> ```bash
+> inspire notebook create -n inspire-demo \
+>   --workspace 昇腾卡公共空间 \
+>   --project 公共科研项目 \
+>   --group 910B资源 \
+>   -q 1,8,64 \
+>   --image ascend-a2-ubuntu:v4.2
+> ```
+
+---
+
+> **问题 4：connection refresh 报 SSH preflight failed**
+>
+> **现象：**
+> ```
+> Error: Tunnel setup completed, but SSH preflight failed.
+> Proxy readiness: HTTP 500.
+> ```
+>
+> **原因：** 910B 昇腾卡与 H100/H200 一样属于"受限 Notebook"，不支持 SSH 通道，应走 JupyterTerminal 通道。
+>
+> **解决：** 此报错本身是正常的，关键看后续 `exec` 能否走通，不必纠结这个错误。
+
+---
+
+> **问题 5（核心根因）：gpu_model 识别失败导致 exec 卡住**
+>
+> **现象：** `inspire notebook exec` 一直卡住无输出；`connection status` 报错。
+>
+> **排查：** 查看 `~/.inspire/notebook-gpu-models.json`，发现 `"gpu_model": ""`（空字符串）。
+>
+> **根因：** InspireSkill 通过在机器上运行 `nvidia-smi` 来识别显卡型号，进而判断走 SSH 还是 JupyterTerminal 通道。但 910B 是昇腾卡，**没有 nvidia-smi，只有 npu-smi**，导致识别失败，`gpu_model` 为空，连接逻辑走错通道。
+>
+> **解决（Workaround）：** 手动修改缓存文件，欺骗 InspireSkill 走 JupyterTerminal 通道。
+>
+> ```bash
+> # 1. 备份原始文件
+> cp ~/.inspire/notebook-gpu-models.json ~/.inspire/notebook-gpu-models.json.bak
+>
+> # 2. 编辑，把 "gpu_model": "" 改成 "gpu_model": "H100"
+> open -e ~/.inspire/notebook-gpu-models.json
+> ```
+>
+> 修改后重新 `connection refresh`，会提示 `SSH/rtunnel access is blocked on H100/H200 notebooks`，然后 `exec` 即可正常执行。
+>
+> **⚠️ 注意：** 这是 workaround，不是官方支持。`gpu_model` 字段只是内部通道选择标记，不影响实际硬件使用。建议后续给 InspireSkill 提 issue 请求官方适配昇腾卡。
+
+---
+
+> **问题 6：实例创建报错 "no available quota"**
+>
+> **现象：** 创建实例时提示没有可用资源。
+>
+> **解决：** 先查可用配额，选一个能用的：
+> ```bash
+> inspire notebook quota --workspace 昇腾卡公共空间
+> ```
+
+---
+
+**快速自查流程（以后遇到类似问题按此顺序排查）：**
+
+```
+1. 实例是不是 InspireSkill 创建的？
+   ├── 否 → 用 inspire notebook create 重建
+   └── 是 → 下一步
+
+2. connection refresh 报 SSH preflight failed？
+   ├── 910B 正常现象，继续下一步
+   └── 走下一步
+
+3. exec 卡住无输出？
+   ├── 检查 ~/.inspire/notebook-gpu-models.json
+   │   └── gpu_model 为空 → 改为 "H100" → refresh → 重试 exec
+   └── 正常 → 检查其他问题
+
+4. 还是不行？
+   ├── inspire notebook list --workspace ... 检查实例状态
+   ├── inspire notebook connection status ... 看连接状态
+   └── 重启实例试试
+```
+
+---
+
+#### 6. 技术要点总结
 
 ## 2026-09-08
 
