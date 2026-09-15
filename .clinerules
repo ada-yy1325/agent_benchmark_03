@@ -21,3 +21,9 @@
 - 远程机器没有 NVIDIA GPU，不要用 nvidia-smi，用 npu-smi info
 - 代码和数据必须放在 /inspire/ 共享盘目录下，否则实例停止后会丢失
 - 安装新依赖后提醒用户保存镜像：inspire notebook save-image inspire-demo --workspace 昇腾卡公共空间
+
+## 已踩过的坑 && 已知约束
+- ModelScope 模型名：Qwen3-14B 在 ModelScope 上是 `Qwen/Qwen3-14B`，不是 `Qwen3-14B-Instruct`
+- vLLM-Ascend 自动检测 NPU，不要加 `--device npu` 参数
+- 启动长期后台服务（如 vLLM）不能用 `nohup` + `inspire notebook exec`，要用 `tmux new-session -d -s <会话名>` 或 `inspire notebook shell` 交互式终端
+- `inspire notebook exec` 只适合跑一次性脚本，执行完断开连接
