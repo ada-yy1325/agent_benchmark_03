@@ -104,7 +104,19 @@ parser = FlexibleArgumentParser(description="vLLM OpenAI-Compatible RESTful API 
 parser = make_arg_parser(parser)
 args = parser.parse_args(CLI_ARGS)
 validate_parsed_serve_args(args)
+
+# ── Fix: model_tag → model ──
+#   The CLI parser stores the positional arg as model_tag,
+#   but api_server.py reads args.model directly.
+#   launch.py / serve.py do this mapping, but we bypass those.
+if hasattr(args, 'model_tag') and args.model_tag is not None:
+    args.model = args.model_tag
+if hasattr(args, 'tokenizer_tag') and args.tokenizer_tag is not None:
+    # Mirror the same pattern for tokenizer
+    args.tokenizer = args.tokenizer_tag
+
 print(f"[patcher] Starting vLLM with: {' '.join(CLI_ARGS)}", flush=True)
+print(f"[patcher]   model={args.model}, served_model_name={args.served_model_name}", flush=True)
 
 # ── Step 6: run_server is async, need event loop ──
 from vllm.entrypoints.openai.api_server import run_server
