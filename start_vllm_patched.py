@@ -14,10 +14,14 @@ import asyncio
 import json
 
 # ── Step 1: Disable AOTAutogradCache BEFORE any vLLM import ──────────
+#   Use proper API (attribute assignment), not direct _config dict mutation.
+#   Directly setting _config dict items with plain bools breaks the nested
+#   config module structure, causing AttributeError: 'bool' object has no
+#   attribute 'hide' during aot_compile.
 import torch._functorch.config as _functorch_cfg
-_functorch_cfg._config['enable_autograd_cache'] = False
-_functorch_cfg._config['bypass_autograd_cache_key'] = True
-print("[patcher] ✓ AOTAutogradCache disabled", flush=True)
+_functorch_cfg.enable_autograd_cache = False     # type: ignore[assignment]
+_functorch_cfg.bypass_autograd_cache_key = True  # type: ignore[assignment]
+print("[patcher] ✓ AOTAutogradCache disabled (via attribute set)", flush=True)
 
 # ── Step 2: Define MODEL_DIR early (used by the patcher below) ──
 MODEL_DIR = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/Qwen3-4B-W8A8"
