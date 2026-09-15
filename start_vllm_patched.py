@@ -15,14 +15,9 @@ _functorch_cfg._config['enable_autograd_cache'] = False
 _functorch_cfg._config['bypass_autograd_cache_key'] = True
 print("[patcher] ✓ AOTAutogradCache disabled", flush=True)
 
-# ── Step 2: Now import vLLM (config stays disabled, module is singleton) ──
-from vllm.entrypoints.openai.api_server import run_server
-
-# ── Step 3: Build CLI args ──
+# ── Step 2: Build CLI args ──
 MODEL_DIR = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/Qwen3-4B-W8A8"
-
-sys.argv = [
-    'vllm', 'serve',
+CLI_ARGS = [
     MODEL_DIR,
     '--port', '8801',
     '--max-model-len', '8192',
@@ -31,5 +26,12 @@ sys.argv = [
     '--served-model-name', 'Qwen3-4B',
 ]
 
-print(f"[patcher] Starting vLLM: {' '.join(sys.argv)}", flush=True)
-run_server()
+# ── Step 3: Parse args and start vLLM ──
+from vllm.entrypoints.openai.cli import make_arg_parser
+parser = make_arg_parser()
+args = parser.parse_args(CLI_ARGS)
+print(f"[patcher] Starting vLLM with: {' '.join(CLI_ARGS)}", flush=True)
+
+# ── Step 4: Must import run_server AFTER parsing, but BEFORE serving ──
+from vllm.entrypoints.openai.api_server import run_server
+run_server(args)
