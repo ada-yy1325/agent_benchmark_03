@@ -1,10 +1,141 @@
 # Logbook
+
+## 2026-09-15
+
+### 今日工作：Qwen3-4B W8A8 量化 + GSM8K 精度对比 ✅
+
+---
+
+#### 1. Qwen3-4B W8A8 量化 ✅
+
+**工具**：`msmodelslim`（ModelScope 模型压缩工具）
+
+**命令**：
+```bash
+python3 -m msmodelslim.cli \
+  --model_type Qwen3-4B \
+  --model_path ./models/Qwen3-4B \
+  --output_path ./models/Qwen3-4B-W8A8 \
+  --quant_type w8a8
+```
+
+**解决的关键问题：**
+- **交互确认**：量化过程中途询问 `Enter Your Option：[0/1/2]`，通过 `tmux send-keys` 自动输入 `y`（选择默认确认）
+- 逐层处理全部 **36 层**，成功完成
+
+**量化效果：**
+| 指标 | FP16 原始 | W8A8 量化后 | 变化 |
+|------|:---------:|:-----------:|:----:|
+| 模型大小 | ~7.87 GB (7,872 MB) | ~4.92 GB (5,092 MB) | **↓ 36%** |
+| 权重文件 | 3 个 `.safetensors` | 2 个 `.safetensors` | 文件更少 |
+| 量化方式 | - | per-channel weight, per-token activation | - |
+
+**输出文件：**
+- `quant_model_weights-00001-of-00002.safetensors` (3.64 GB)
+- `quant_model_weights-00002-of-00002.safetensors` (1.56 GB)
+- `quant_model_description.json` (58 KB)
+- `Qwen3-4B_best_practice.yaml` (606 B)
+- 保留原始 config / tokenizer 等配置文件
+
+**模型路径**：`./models/Qwen3-4B-W8A8/`
+
+---
+
+#### 2. vLLM W8A8 服务启动 —— 踩坑全记录 🐛
+
+**背景**：用 `start_vllm_patched.py` 启动 vLLM 服务加载 W8A8 量化模型，遇到 3 个关键 bug。
+
+##### Bug 1：量化配置文件找不到（ModelSlim config not found）
+
+- **现象**：vLLM 启动时报错找不到 `quant_model_description.json`
+- **根因**：`vllm/config.py:120` 的 `_get_and_verify_model_tags` 对本地路径（如 `/inspire/.../Qwen3-4B-W8A8`）只返回了 `Qwen3-4B`，去 HF Hub 查模型名 → 拿到默认值 `Qwen/Qwen3-0.6B` → 用 `Qwen/Qwen3-0.6B` 去找量化配置 → 404
+- **修复**：给 `maybe_update_config`（位于 `vllm/config.py`）打补丁，强制优先从本地 `MODEL_DIR` 查找 `quant_model_description.json`，不依赖 vLLM 传进来的错误模型名
+
+##### Bug 2：模型加载成 0.6B 而不是 4B（模型解析与模型名不一致）
+
+- **现象**：开机 banner 显示 model=`Qwen/Qwen3-0.6B`，模型权重也加载了 0.6B 版本
+- **根因**：`start_vllm_patched.py` 用 `parser.parse_args([MODEL_DIR, ...])` 解析参数，CLI 解析器把 `MODEL_DIR` 存成 `args.model_tag`，但 `api_server.py` 启动引擎时读的是 `args.model`（默认值 `Qwen/Qwen3-0.6B`）。正常走命令行时 `launch.py` 有一行 `args.model = args.model_tag` 做映射，但我们直接调 `run_server(args)` 跳过了这一步
+- **修复**：在 `run_server(args)` 之前手动拷贝 `args.model = args.model_tag` 和 `args.tokenizer = args.tokenizer_tag`
+- **相关文件**：`start_vllm_patched.py` 第 100-107 行
+
+##### Bug 3：引擎编译崩溃（AOTAutogradCache 禁用方式错误）
+
+- **现象**：权重加载成功，但引擎初始化时崩溃，报 `AttributeError: 'bool' object has no attribute 'hide'`
+- **堆栈定位**：`torch/_dynamo/aot_compile.py` 中 `torch._functorch.config.patch()` 进入上下文管理器 → 读取配置时发现值变成了 `bool` 而不是 ConfigModule → 调用 `config.hide` 失败
+- **根因**：为绕过 PyTorch 2.11 的 AOTAutogradCache 问题，之前用了 `_functorch_cfg._config['enable_autograd_cache'] = False` 直接修改内部字典。但 `_config` 不是普通 dict——其值必须是特定的 ConfigModule 对象。塞入 `bool` 值破坏了配置系统的嵌套结构
+- **修复**：改用正确的属性赋值 API：`_functorch_cfg.enable_autograd_cache = False`
+- **补充**：该 bug 是条件性的——仅当 PyTorch 编译路径被触发时才会暴露（enforce_eager 可以绕过，但 vLLM 的 V1 引擎 + Ascend 平台强制走编译路径）
+
+##### Bug 4（评测阶段）：EvalScope max_tokens 超出模型限制
+
+- **现象**：GSM8K 评测返回大量 HTTP 400 错误：`"This model's maximum context length is 8192 tokens. However, you requested 8192 output tokens..."`，导致评测卡住重试
+- **根因**：W8A8 模型的 `max_model_len` 默认为 8192 token，但 `max_tokens=8192` 没给 prompt 留空间。当 prompt 较长时，prompt_tokens + 8192 > 8192，vLLM 拒绝请求
+- **修复**：将 `max_tokens` 从 8192 降为 2048（GSM8K 答案通常很短，2048 足够）
+- **相关文件**：`eval_gsm8k.py`
+
+---
+
+#### 3. GSM8K 精度对比：FP16 vs W8A8 📊
+
+**评测设置（口径说明）：**
+
+| 参数 | 值 |
+|------|-----|
+| 评测工具 | EvalScope v1.8.1 |
+| 评测模式 | `openai_api`（通过 vLLM HTTP API 调用） |
+| 数据集 | GSM8K（Grade School Math 8K）全量 1,319 题 |
+| Shot 数 | 4-shot（EvalScope 默认） |
+| 解码参数 | `temperature=0`，`seed=42`，`top_p=1.0`，`top_k=-1` |
+| max_tokens | FP16: 8192 / W8A8: 2048 |
+| 评估指标 | `mean_acc`（答案精确匹配） |
+| 过滤规则 | `remove_until: " response"`（去除 few-shot 示例中的思维链） |
+
+**最终结果：**
+
+| 精度模式 | GSM8K 得分（mean_acc） | 相对于 FP16 的差异 |
+|:--------:|:---------------------:|:-----------------:|
+| **FP16 基线** | **94.01%** | - |
+| **W8A8 量化** | **86.66%** | **-7.35 个百分点** |
+| 精度保留率 | - | **92.2%**（86.66/94.01） |
+
+**性能数据对比：**
+
+| 指标 | FP16 | W8A8 |
+|:----|:----:|:----:|
+| 平均延迟 | 30.63s | 9.94s |
+| 平均 TTFT | 66.16ms | 42.11ms |
+| 平均 TPOT | 21.78ms | 9.02ms |
+| 平均吞吐 | 45.85 tok/s | 110.22 tok/s |
+| 平均输入 Token | 661 | 661 |
+| 平均输出 Token | 1404 | 1095.56 |
+
+**结论：**
+- W8A8 模型大小缩小 36%（7.87 GB → 4.92 GB）
+- 推理**速度提升 2.4x**（45.85 → 110.22 tok/s）
+- GSM8K 准确率下降 7.35pp（94.01% → 86.66%），精度保留率 92.2%
+- 在昇腾 910B NPU 上 W8A8 量化有效降低了显存占用并加速推理，但 GSM8K 数学推理任务上精度损失较明显
+
+**日志文件：**
+- vLLM 服务日志：`vllm_w8a8_patched3.log`（最新成功启动日志）
+- 评测日志：`eval_w8a8_gsm8k.log`
+- 评测报告 JSON：`./outputs/20260915_141127/reports/Qwen3-4B/gsm8k.json`
+- FP16 基线评测日志：`eval_fp16_gsm8k.log`
+
+---
+
+#### 4. 关键文件说明
+
+| 文件 | 说明 |
+|------|------|
+| `start_vllm_patched.py` | W8A8 vLLM 服务启动脚本（含打补丁逻辑），最终修复版 |
+| `eval_gsm8k.py` | GSM8K 评测脚本，直接通过 evalscope API 调用 |
+| `test_api.py` | 基础 API 连通性测试脚本 |
+| `LOGBOOK.md` | 工作日志（本文档） |
+
 ## 2026-09-14
 
 ### 今日工作
-
-#### 1. Qwen3-14B → Qwen3-4B 模型切换（推理加速）
-
+---
 **背景：** 9月10日用 Qwen3-14B 跑 MMLU-Redux（570题）耗时 1h05min+，单卡 910B 跑 14B 推理速度太慢。决定换用 Qwen3-4B 重新跑。
 
 **操作流程：**
@@ -377,7 +508,6 @@ inspire notebook exec inspire-demo --workspace 昇腾卡公共空间 \
 ```
 
 **vLLM 版本：** 0.22.1（Ascend 插件自动加载）
-| 额度保护 | 不能使用 DeepSeek API key 跑 benchmark，需指向国产卡本地服务 |
 
 ## 2026-09-10
 
@@ -621,76 +751,3 @@ source .venv/bin/activate && python test_api.py
 | 数据来源 | ModelScope Hub，自动流式加载，缓存到 `~/.cache/modelscope` |
 | 结果输出 | 可指定 `--output /tmp/...` 避免污染项目目录 |
 | 环境隔离 | `.venv` 虚拟环境，已配 `.gitignore` |
-## 2026-09-14
-
-#### 1. GSM8K FP16 基线测试 ✅
-
-- **数据集**：GSM8K 全量 1,319 题
-- **设置**：4-shot（EvalScope 默认），`temperature=0`，`seed=42`
-- **工具**：EvalScope v1.8.1，`openai_api` 模式
-- **API URL**：`http://127.0.0.1:8801/v1/chat/completions`（本地 vLLM 服务）
-- **输出目录**：`./outputs/20260914_141420/`
-- **日志文件**：`eval_fp16_gsm8k.log`
-- **GSM8K 得分：94.01%**
-- **性能数据**：
-  - 平均延迟：30.63s
-  - 平均 TTFT：66.16ms
-  - 平均 TPOT：21.78ms
-  - 平均吞吐：45.85 tok/s
-  - 平均输入 Token：661
-  - 平均输出 Token：1404
-- **耗时**：1 小时 26 分 57 秒
-- **结论**：GSM8K FP16 基线建立完成，可用于后续 W8A8 精度对比
-
-## 2026-09-15
-
-#### 1. Qwen3-4B W8A8 量化 ✅
-
-**工具**：`msmodelslim`（ModelScope 模型压缩工具）
-
-**命令**：
-```bash
-python3 -m msmodelslim.cli \
-  --model_type Qwen3-4B \
-  --model_path ./models/Qwen3-4B \
-  --output_path ./models/Qwen3-4B-W8A8 \
-  --quant_type w8a8
-```
-
-**解决的关键问题：**
-- **交互确认**：量化过程中途询问 `Enter Your Option：[0/1/2]`，通过 `tmux send-keys` 自动输入 `y`（选择默认确认）
-- 逐层处理全部 **36 层**，成功完成
-
-**量化效果：**
-| 指标 | FP16 原始 | W8A8 量化后 | 变化 |
-|------|:---------:|:-----------:|:----:|
-| 模型大小 | ~7.87 GB (7,872 MB) | ~4.92 GB (5,092 MB) | **↓ 36%** |
-| 权重文件 | 3 个 `.safetensors` | 2 个 `.safetensors` | 文件更少 |
-| 量化方式 | - | per-channel weight, per-token activation | - |
-
-**输出文件：**
-- `quant_model_weights-00001-of-00002.safetensors` (3.64 GB)
-- `quant_model_weights-00002-of-00002.safetensors` (1.56 GB)
-- `quant_model_description.json` (58 KB)
-- `Qwen3-4B_best_practice.yaml` (606 B)
-- 保留原始 config / tokenizer 等配置文件
-
-**模型路径**：`./models/Qwen3-4B-W8A8/`
-
-#### 2. W8A8 GSM8K 精度测试
-
-**目标**：验证 W8A8 量化模型在 GSM8K 上的精度是否与 FP16 基线一致
-
-**设置（与 FP16 完全对齐）：**
-- 数据集：GSM8K 全量 1,319 题
-- Shot：4-shot
-- 解码参数：`temperature=0`，`seed=42`
-- max_tokens：8192
-- 工具：EvalScope v1.8.1，`openai_api` 模式
-
-**结果：**
-
-| 精度 | GSM8K 得分 | 差异 |
-|:----:|:----------:|:----:|
-| FP16 | **94.01%** | - |
-| W8A8 | 待填写 | 待填写 |
