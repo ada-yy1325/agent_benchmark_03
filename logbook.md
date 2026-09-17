@@ -989,3 +989,34 @@ source .venv/bin/activate && python test_api.py
 | 数据来源 | ModelScope Hub，自动流式加载，缓存到 `~/.cache/modelscope` |
 | 结果输出 | 可指定 `--output /tmp/...` 避免污染项目目录 |
 | 环境隔离 | `.venv` 虚拟环境，已配 `.gitignore` |
+## 2026-09-17（续）
+
+### 根因分析：Base GSM8K 49.36% ≠ 官方 87.79% 的原因 🔍
+
+**从官方表格确认：** Qwen3-4B-Base GSM8K = **87.79%**，我们 FP16 测出来只有 49.36%。
+
+**三个叠加原因：**
+
+| # | 问题 | 我们的 (EvalScope) | 官方 (lm-eval) | 预期影响 |
+|:-|:----|:-----------------|:--------------|:--------:|
+| 1 | API 端点 | `/v1/chat/completions`（Chat API） | `/v1/completions`（Completion API） | ~15-20pp |
+| 2 | Prompt 格式 | Instruction prompt（"Please reason step by step..."） | 续写格式（"Let's think step by step."） | ~10-15pp |
+| 3 | Few-shot 数 | 4-shot（EvalScope 默认） | 8-shot | ~3-5pp |
+| **合计** | | | | **~38pp** |
+
+**根因 1（最严重）：Chat API 对 Base 模型不适用**
+- `eval_gsm8k_base.py` 用了 `api_url=".../v1/chat/completions"`
+- vLLM 自动对 messages 应用 Chat Template（`<|im_start|>user / <|im_end|> / <|im_start|>assistant`）
+- Base 模型预训练时见的是纯文本，不擅长 chat 格式
+- 平均输出 954 token 说明模型在"自由续写"，而非按格式回答问题
+
+**根因 2 & 3：Prompt 和 few-shot 格式**
+- EvalScope template 用 `"Please reason step by step..."` + `\boxed{}`（适合 Instruct）
+- 官方 lm-eval 用 `"Let's think step by step..."` + `"The answer is X"`（适合 Base）
+- 4-shot 不够，8-shot 能让模型更好地跟随示例
+
+**修复方案：** 新建 `eval_gsm8k_base_correct.py`
+- 直接调用 `/v1/completions`（纯 completion API）
+- lm-eval 标准 8-shot CoT prompt
+- regex 提取 `"The answer is X"` 格式答案
+- 待远程启动实例后验证（需先拉取最新代码）
