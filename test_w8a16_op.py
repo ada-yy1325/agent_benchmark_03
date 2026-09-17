@@ -1,83 +1,61 @@
-"""测试 npu_weight_quant_batchmatmul 算子是否工作正常"""
+"""测试 W8A16 方案注册和 NPU 算子"""
 import torch
 import torch_npu
 
-print("=== 检查算子是否存在 ===")
-# 检查 npu_weight_quant_batchmatmul 是否存在
-has_op = hasattr(torch_npu, "npu_weight_quant_batchmatmul")
-print(f"torch_npu.npu_weight_quant_batchmatmul exists: {has_op}")
+print("=" * 60)
+print("1. 算子是否存在")
+print("=" * 60)
+print(f"torch_npu.npu_weight_quant_batchmatmul: {hasattr(torch_npu, 'npu_weight_quant_batchmatmul')}")
 
-if not has_op:
-    # 尝试其他方式查找
-    try:
-        op = getattr(torch.ops.npu, "weight_quant_batchmatmul", None)
-        if op is not None:
-            print(f"torch.ops.npu.weight_quant_batchmatmul: {op}")
-            has_op = True
-        else:
-            print("torch.ops.npu.weight_quant_batchmatmul not found")
-    except Exception as e:
-        print(f"torch.ops check failed: {e}")
+print("\n" + "=" * 60)
+print("2. W8A16 注册情况")
+print("=" * 60)
+from vllm_ascend.quantization.methods.registry import _SCHEME_REGISTRY as base_r
+print(f"Base scheme ('W8A16', 'linear') registered: {('W8A16', 'linear') in base_r}")
 
-print(f"\n=== 检查 W8A16 方案是否被注册 ===")
-from vllm_ascend.quantization.methods.registry import _SCHEME_REGISTRY as base_registry
-for k, v in base_registry.items():
-    if 'w8a16' in str(k).lower() or 'w8a16' in v.__name__.lower():
-        print(f"  Base registered: {k} -> {v}")
+from vllm_ascend._310p.quantization.methods.registry import _SCHEME_REGISTRY as p310_r
+print(f"310P scheme ('W8A16', 'linear') registered: {('W8A16', 'linear') in p310_r}")
 
-from vllm_ascend._310p.quantization.methods.registry import _SCHEME_REGISTRY as _310p_registry
-for k, v in _310p_registry.items():
-    if 'w8a16' in str(k).lower() or 'w8a16' in v.__name__.lower():
-        print(f"  310P registered: {k} -> {v}")
-
-print(f"\n=== 查看 310P create_scheme_for_layer 导入的 get_scheme_class ===")
-import vllm_ascend._310p.quantization.modelslim_config as m310
+print("\n" + "=" * 60)
+print("3. 310P create_scheme_for_layer 的 get_scheme_class 来源")
+print("=" * 60)
+import vllm_ascend._310p.quantization.modelslim_config as m310p
 import inspect
-# 检查 create_scheme_for_layer 的源码
-src = inspect.getsource(m310.create_scheme_for_layer)
-# 提取导入的 get_scheme_class
-for line in src.split('\n'):
+src_lines = inspect.getsource(m310p.create_scheme_for_layer).split('\n')
+for line in src_lines:
     if 'import' in line or 'get_scheme_class' in line:
         print(f"  {line.strip()}")
 
-print(f"\n=== 检查哪个 AscendModelSlimConfig 被使用 ===")
-from vllm.model_executor.layers.quantization import QUANTIZATION_CONFIG_REGISTRY
-active_cls = QUANTIZATION_CONFIG_REGISTRY.get("ascend")
-if active_cls:
-    print(f"Active quant config for 'ascend': {active_cls.__module__}.{active_cls.__name__}")
-else:
-    print("No active quant config found for 'ascend'")
+print("\n" + "=" * 60)
+print("4. 活跃的量化配置类")
+print("=" * 60)
+from vllm.model_executor.layers.quantization.base_config import QUANTIZATION_CONFIG_REGISTRY
+cls = QUANTIZATION_CONFIG_REGISTRY.get("ascend")
+print(f"Active class: {cls.__module__}.{cls.__name__}")
 
-print(f"\n=== 验证 W8A16 scheme 正确性 ===")
-# 模拟一个小矩阵乘法
+print("\n" + "=" * 60)
+print("5. NPU 算子验证")
+print("=" * 60)
 M, N, K = 2, 4, 8
 x = torch.randn(M, K, dtype=torch.bfloat16).npu()
-weight_int8 = torch.randint(-128, 127, (K, N), dtype=torch.int8).npu()
-scale = torch.randn(N, 1, dtype=torch.float32).npu().abs() * 0.001
-offset = torch.randn(N, 1, dtype=torch.float32).npu() * 0.01
+wi8 = torch.randint(-128, 127, (K, N), dtype=torch.int8).npu()
+s = torch.randn(N, 1, dtype=torch.float32).npu().abs() * 0.001
+o = torch.randn(N, 1, dtype=torch.float32).npu() * 0.01
 
-# 预期结果: 反量化权重再做矩阵乘
-weight_fp16 = (weight_int8.to(torch.float32) * scale + offset).to(torch.bfloat16)
-expected = (x.to(torch.float32) @ weight_fp16.to(torch.float32)).to(torch.bfloat16)
-print(f"Expected output (FP16 matmul): {expected}")
+wfp = (wi8.to(torch.float32) * s + o).to(torch.bfloat16)
+exp = (x.to(torch.float32) @ wfp.to(torch.float32)).to(torch.bfloat16)
+print(f"Expected: {exp}")
 
-# NPU 算子结果
 try:
-    output = torch_npu.npu_weight_quant_batchmatmul(
-        x=x,
-        weight=weight_int8.T.contiguous(),
-        antiquant_scale=scale.flatten(),
-        antiquant_offset=offset.flatten(),
-        bias=None,
-    )
-    print(f"NPU op output: {output}")
-    diff = (expected - output).abs().max().item()
+    out = torch_npu.npu_weight_quant_batchmatmul(
+        x=x, weight=wi8.T.contiguous(),
+        antiquant_scale=s.flatten(), antiquant_offset=o.flatten(),
+        bias=None)
+    print(f"NPU op:  {out}")
+    diff = (exp - out).abs().max().item()
     print(f"Max diff: {diff:.6f}")
-    if diff < 0.1:
-        print("✅ 算子正常工作!")
-    else:
-        print("❌ 算子输出与预期不符!")
+    print("✅ 算子工作正常" if diff < 0.1 else "❌ 算子异常")
 except Exception as e:
-    print(f"❌ 算子调用失败: {e}")
+    print(f"❌ 算子失败: {e}")
     import traceback
     traceback.print_exc()
