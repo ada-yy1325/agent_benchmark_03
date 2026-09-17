@@ -17,7 +17,7 @@ from vllm_ascend._310p.quantization.methods.registry import _SCHEME_REGISTRY as 
 print(f"310P scheme ('W8A16', 'linear') registered: {('W8A16', 'linear') in p310_r}")
 
 print("\n" + "=" * 60)
-print("3. 310P create_scheme_for_layer 的 get_scheme_class 来源")
+print("3. 310P import 的 get_scheme_class 来源")
 print("=" * 60)
 import vllm_ascend._310p.quantization.modelslim_config as m310p
 import inspect
@@ -27,11 +27,19 @@ for line in src_lines:
         print(f"  {line.strip()}")
 
 print("\n" + "=" * 60)
-print("4. 活跃的量化配置类")
+print("4. 找 QUANTIZATION_CONFIG_REGISTRY")
 print("=" * 60)
-from vllm.model_executor.layers.quantization.base_config import QUANTIZATION_CONFIG_REGISTRY
-cls = QUANTIZATION_CONFIG_REGISTRY.get("ascend")
-print(f"Active class: {cls.__module__}.{cls.__name__}")
+import vllm.model_executor.layers.quantization as qmod
+for attr_name in dir(qmod):
+    if 'REGISTRY' in attr_name:
+        reg = getattr(qmod, attr_name)
+        if hasattr(reg, 'get'):
+            active = reg.get("ascend")
+            if active:
+                print(f"Found registry at vllm.model_executor.layers.quantization.{attr_name}")
+                print(f"Active class: {active.__module__}.{active.__name__}")
+            else:
+                print(f"No 'ascend' config in vllm.model_executor.layers.quantization.{attr_name}")
 
 print("\n" + "=" * 60)
 print("5. NPU 算子验证")
@@ -54,8 +62,8 @@ try:
     print(f"NPU op:  {out}")
     diff = (exp - out).abs().max().item()
     print(f"Max diff: {diff:.6f}")
-    print("✅ 算子工作正常" if diff < 0.1 else "❌ 算子异常")
+    print("OK" if diff < 0.1 else "FAIL")
 except Exception as e:
-    print(f"❌ 算子失败: {e}")
+    print(f"Error: {e}")
     import traceback
     traceback.print_exc()
