@@ -9,7 +9,7 @@ base = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/mode
 print("=" * 60)
 print("W8A8 模型权重格式")
 print("=" * 60)
-with safe_open(f"{base}/Qwen3-4B-Base-W8A8/model-00001-of-00002.safetensors", framework="pt") as f:
+with safe_open(f"{base}/Qwen3-4B-Base-W8A8/quant_model_weights-00001-of-00002.safetensors", framework="pt") as f:
     keys = list(f.keys())
     print(f"Total tensors: {len(keys)}")
     layer0_keys = [k for k in keys if "layers.0.self_attn.q_proj" in k][:5]
@@ -22,7 +22,7 @@ print()
 print("=" * 60)
 print("W8A16 模型权重格式")
 print("=" * 60)
-with safe_open(f"{base}/Qwen3-4B-Base-W8A16/model-00001-of-00001.safetensors", framework="pt") as f:
+with safe_open(f"{base}/Qwen3-4B-Base-W8A16/quant_model_weights-00001-of-00001.safetensors", framework="pt") as f:
     keys = list(f.keys())
     print(f"Total tensors: {len(keys)}")
     layer0_keys = [k for k in keys if "layers.0.self_attn.q_proj" in k][:5]
