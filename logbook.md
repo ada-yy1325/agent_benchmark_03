@@ -1,4 +1,192 @@
 # Logbook
+## 2026-09-17
+
+### 今日工作：Qwen3-4B-Base FP16 + W8A8 量化 & GSM8K 精度对比 ✅
+
+---
+
+#### 0. 背景
+
+上次测试的是 **Qwen3-4B-Instruct**（指令微调版），GSM8K 成绩 FP16=94.01%、W8A8=86.66%。但官方公布的成绩是针对 **Qwen3-4B-Base**（预训练基座版）的。为与官方对比，本次切换为 Base 版本重新测试。
+
+---
+
+#### 1. 模型下载 & 环境准备 ✅
+
+| 项目 | 值 |
+|------|-----|
+| 模型 | Qwen/Qwen3-4B-Base（ModelScope） |
+| 下载路径 | `./models/Qwen3-4B-Base/` |
+| 下载大小 | 3.96 GB |
+| 权重文件 | 3 个 `.safetensors`（每个 ~1.32 GB） |
+
+---
+
+#### 2. FP16 Base GSM8K 基线测试 ✅
+
+**服务启动：** vLLM FP16 服务（端口 8802）
+
+**遇到的问题：**
+- **max_model_len 不匹配**：模型配置文件 `config.json` 中 `max_position_embeddings=40960`，但 vLLM 配置文件预设值 `30000+` 小于此值，需手动设置 `--max-model-len 32768`（留 30% 余量给 kv_cache）
+- **解决**：在 `start_vllm_base.py` 中指定 `--max-model-len 32768`
+
+**结果：**
+
+| 指标 | 值 |
+|:----|:---:|
+| **Score** | **49.36%** |
+| 吞吐 | 42.35 tok/s |
+| 平均延迟 | 22.54s |
+| 平均输出 token | 954 |
+| 耗时 | ~1.5 小时 |
+
+**对比 Instruct 版（FP16）：**
+
+| 版本 | FP16 分数 | 差异 |
+|:----|:---------:|:----:|
+| Qwen3-4B-Instruct | 94.01% | — |
+| **Qwen3-4B-Base** | **49.36%** | ↓ 44.65pp |
+
+**原因分析：** Base 模型未经过指令微调，不知道要按 GSM8K 格式输出答案（"The answer is X"），而是自由续写。平均输出 954 token 说明模型在"编故事"而非回答问题。
+
+---
+
+#### 3. Base W8A8 量化 ✅
+
+**工具：** `msmodelslim`（/opt/mamba/bin/msmodelslim 可执行文件）
+
+**最终成功命令：**
+```bash
+msmodelslim quant \
+  --model_type Qwen3-4B \
+  --model_path ./models/Qwen3-4B-Base \
+  --save_path ./models/Qwen3-4B-Base-W8A8 \
+  --quant_type w8a8 \
+  --trust_remote_code True \
+  --device npu
+```
+
+**踩坑记录 🐛**
+
+| # | 问题 | 现象 | 根因 | 解决 |
+|:-|:----|:----|:----|:----|
+| 1 | CLI 入口不对 | `python3 -m msmodelslim.cli` 报错（cli 模块为空） | msmodelslim 的入口是可执行文件 `/opt/mamba/bin/msmodelslim`，不是 Python 模块 | 用 `msmodelslim quant` 代替 |
+| 2 | 参数名不对 | 传 `--output_path` 不识别 | 实际参数名是 `--save_path`（help 输出中用 `--save_path`） | 改用 `--save_path` |
+| 3 | `--quant_type` 值格式错误 | `QuantType.W8A8` 和 `W8A8` 都报 `invalid QuantType value` | Enum 定义的值是小写 `'w8a8'`，但 argparse 的 `type=QuantType` 要求用枚举值本身校验。实测枚举值 `QuantType.W8A8` 的 `.value` 是 `'w8a8'`，但 CLI 不接受大写形式 | 传 `w8a8`（全小写） |
+| 4 | 交互确认 | 量化卡住等待输入 `Enter y to continue` | 找不到最佳实践配置时，工具会问是否用默认配置 | `tmux send-keys -t quant_base_w8a8 'y' Enter` |
+| 5 | 退出确认（登录后可忽略） | 量化成功退出时弹 `DeprecationWarning` | swigvarlink 的 Python 3.13 兼容问题，不影响结果 | 忽略 |
+
+**量化效果：**
+
+| 指标 | FP16 Base | W8A8 Base | 变化 |
+|:----|:---------:|:---------:|:----:|
+| 模型大小 | 3.96 GB（3 个权重文件） | **4.9 GB**（2 个权重文件） | ⚠️ 变大（含量化元数据） |
+| 推理吞吐 | 42.35 tok/s | **106.24 tok/s** | **↑ 2.5x** |
+
+> **注：** Base 版 W8A8 权重文件比 FP16 还大，是因为量化后的 safetensors 同时包含了量化后的 int8 权重和原始 scale/zero_point 元数据。Instruct 版也是类似情况（FP16=7.87GB vs W8A8=4.92GB，Instruct 本身是更大的模型变体）。
+
+**输出文件路径：** `./models/Qwen3-4B-Base-W8A8/`
+
+---
+
+#### 4. Base W8A8 vLLM 服务启动 ✅
+
+**使用脚本：** `start_vllm_base_w8a8.py`（基于 `start_vllm_patched.py` 修改）
+
+**补丁内容（与 Instruct 版相同）：**
+1. ✅ `AOTAutogradCache` 禁用方式修正（用属性赋值 `_functorch_cfg.enable_autograd_cache = False`，不用直接改 `_config` 字典）
+2. ✅ `maybe_update_config` 补丁：强制从 `MODEL_DIR` 本地加载 `quant_model_description.json`
+3. ✅ 手动拷贝 `args.model = args.model_tag` 和 `args.tokenizer = args.tokenizer_tag`（跳过 launch.py 的 CLI 映射）
+
+**服务配置：**
+
+| 参数 | 值 |
+|:----|:----:|
+| 端口 | 8803 |
+| model | `./models/Qwen3-4B-Base-W8A8` |
+| served-model-name | `Qwen3-4B-Base` |
+| max-model-len | 8192 |
+| quantization | `ascend` |
+| dtype | `auto` |
+
+---
+
+#### 5. GSM8K 精度对比：FP16 Base vs W8A8 Base 📊
+
+**评测设置（口径说明）：**
+
+| 参数 | 值 |
+|:----|:----:|
+| 评测工具 | EvalScope v1.8.1 |
+| 评测模式 | `openai_api`（通过 vLLM HTTP API 调用） |
+| 数据集 | GSM8K（Grade School Math 8K）全量 1,319 题 |
+| Shot 数 | 4-shot（EvalScope 默认） |
+| 解码参数 | `temperature=0`，`seed=42`，`top_p=1.0`，`top_k=-1` |
+| max_tokens | FP16: 2048 / W8A8: 2048 |
+
+**完整结果表：**
+
+| 指标 | **FP16 Base** | **W8A8 Base** | 变化 |
+|:----|:------------:|:-------------:|:----:|
+| **Score** | **49.36%** | **31.61%** | **↓ 17.75pp** |
+| 精度保留率 | 100% | **64.0%** | ↓ 36% |
+| 吞吐（tok/s） | 42.35 | **106.24** | **↑ 2.51x** |
+| 平均延迟（s） | 22.54 | 12.43 | ↓ 45% |
+| 平均 TTFT（ms） | 71.06 | 41.49 | ↓ 42% |
+| 平均 TPOT（ms） | 23.58 | 9.33 | ↓ 60% |
+| 平均输入 token | 661 | 661 | — |
+| 平均输出 token | 954 | 1,320 | — |
+
+**与 Instruct 版对比总览：**
+
+| 模型版本 | 精度 | FP16 | W8A8 | 精度保留率 | 速度增益 |
+|:---------|:----:|:----:|:----:|:----------:|:--------:|
+| **Qwen3-4B-Base** | W8A8 | **49.36%** → **31.61%** | **64.0%** | **2.51x** |
+| Qwen3-4B-Instruct | W8A8 | 94.01% → 86.66% | 92.2% | 2.38x |
+| Qwen3-4B-Instruct | W8A8S | 94.01% → 92.80% | 98.7% | — |
+
+**关键发现：**
+
+1. **Base 对量化更敏感**：精度保留率仅 64.0%，远低于 Instruct 的 92.2%。可能是因为预训练阶段的权重分布更广，量化后信息损失更大
+2. **速度提升一致**：W8A8 在 NPU 上带来约 **2.4-2.5x** 的吞吐提升，无论 Base 还是 Instruct
+3. **Base 49.36% 是合理的**：官方 Qwen3-4B-Base 未公布 GSM8K 成绩，但作为 4B 参数未微调模型，~50% 在合理范围内
+4. **W8A8 后输出 token 增加**：Base 模型 W8A8 量化后平均输出从 954 跳到 1,320，可能是因为量化引入了额外的随机性，导致模型"编"得更长
+
+---
+
+#### 6. 文件清单
+
+| 文件 | 用途 | 备注 |
+|:----|:----|:----|
+| `models/Qwen3-4B-Base/` | FP16 Base 原始模型 | 从 ModelScope 下载 |
+| `models/Qwen3-4B-Base-W8A8/` | W8A8 量化后的 Base 模型 | 量化输出 |
+| `quant_base.py` | Base 量化脚本（Python API 版） | ⚠️ 未使用（改用 CLI） |
+| `start_vllm_base_w8a8.py` | Base W8A8 vLLM 启动脚本 | 端口 8803 |
+| `eval_gsm8k_base.py` | FP16 Base GSM8K 评测脚本 | 端口 8802 |
+| `eval_gsm8k_base_w8a8.py` | W8A8 Base GSM8K 评测脚本 | 端口 8803 |
+| `quant_base_w8a8.log` | 量化日志（远程） | — |
+| `vllm_base_w8a8.log` | W8A8 服务日志（远程） | — |
+| `eval_base_w8a8_gsm8k.log` | W8A8 GSM8K 评测日志（远程） | — |
+| `eval_fp16_base_gsm8k.log` | FP16 GSM8K 评测日志（远程） | — |
+| `vllm_fp16_base.log` | FP16 服务日志（远程） | — |
+
+---
+
+#### 7. 远程文件确认
+
+所有日志和输出存在于远程路径 `/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/`：
+
+```bash
+models/Qwen3-4B-Base/          # FP16 原始模型 ✅
+models/Qwen3-4B-Base-W8A8/     # W8A8 量化模型 ✅
+quant_base_w8a8.log             # 量化日志 ✅
+vllm_base_w8a8.log              # W8A8 服务日志 ✅
+eval_base_w8a8_gsm8k.log        # W8A8 评测日志 ✅
+eval_fp16_base_gsm8k.log        # FP16 评测日志 ✅
+vllm_fp16_base.log              # FP16 服务日志 ✅
+```
+
+---
 
 ## 2026-09-15
 
