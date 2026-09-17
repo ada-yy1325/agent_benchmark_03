@@ -1,35 +1,54 @@
-"""验证 W8A16 乱码根因：scale dtype 不兼容"""
+"""测试 NZ 格式对 W8A16 算子是否有影响"""
 import torch
 import torch_npu
 
-B, M, N, K = 1, 2, 4, 8
-x = torch.randn(B, M, K, dtype=torch.bfloat16).npu()
-w = torch.randint(-128, 127, (N, K), dtype=torch.int8).npu()
+ACL_FORMAT_FRACTAL_NZ = 2
 
-s_f32 = torch.randn(N, dtype=torch.float32).npu().abs() * 0.001
-o_f32 = torch.randn(N, dtype=torch.float32).npu() * 0.01
+# 模拟真实 W8A16 权重
+K, N = 2560, 4096
+w_i8 = torch.randint(-127, 127, (K, N), dtype=torch.int8)
+s = torch.randn(N, dtype=torch.bfloat16).abs() * 0.001
+o = torch.randn(N, dtype=torch.bfloat16) * 0.01
 
-print("1. scale=float32 (W8A16 默认行为)")
+print("1. W8A16 weight (int8 contiguous)")
+print(f"   shape: {w_i8.shape} dtype: {w_i8.dtype}")
+
+# 转为 NZ 格式（模拟 maybe_trans_nz）
+w_nz = torch_npu.npu_format_cast(w_i8.npu(), ACL_FORMAT_FRACTAL_NZ)
+print(f"\n2. NZ format 转换:")
+print(f"   shape: {w_nz.shape}")
+print(f"   is_nz: {w_nz.npu_format == ACL_FORMAT_FRACTAL_NZ}")
+
+x = torch.randn(1, 128, K, dtype=torch.bfloat16).npu()
+s_npu = s.npu()
+o_npu = o.npu()
+
+print("\n3. 用 contiguous int8 weight 测试算子")
 try:
-    out = torch_npu.npu_weight_quant_batchmatmul(
-        x=x, weight=w.t().contiguous(),
-        antiquant_scale=s_f32, antiquant_offset=o_f32, bias=None)
-    print(f"   OK: {out}")
+    out1 = torch_npu.npu_weight_quant_batchmatmul(
+        x=x, weight=w_i8.npu(),
+        antiquant_scale=s_npu, antiquant_offset=o_npu, bias=None)
+    print(f"   OK: {out1.shape}")
+    out1_ok = True
 except Exception as e:
     print(f"   FAIL: {e}")
+    out1_ok = False
 
-print("\n2. scale=bfloat16 (应该可行)")
-s_bf16 = s_f32.to(torch.bfloat16)
-o_bf16 = o_f32.to(torch.bfloat16)
+print("\n4. 用 NZ format int8 weight 测试算子")
 try:
-    out = torch_npu.npu_weight_quant_batchmatmul(
-        x=x, weight=w.t().contiguous(),
-        antiquant_scale=s_bf16, antiquant_offset=o_bf16, bias=None)
-    print(f"   OK: {out}")
+    out2 = torch_npu.npu_weight_quant_batchmatmul(
+        x=x, weight=w_nz,
+        antiquant_scale=s_npu, antiquant_offset=o_npu, bias=None)
+    print(f"   OK: {out2.shape}")
+    if out1_ok:
+        diff = (out1 - out2).abs().max().item()
+        print(f"   vs contiguous maxdiff: {diff:.4f}")
+    out2_ok = True
 except Exception as e:
     print(f"   FAIL: {e}")
+    print(f"   ❗ NZ format 不被支持 → root cause of garbled output")
 
-print("\n3. Expected (纯 FP matmul)")
-weight_fp = (w.t().to(torch.float32) * s_f32 + o_f32).to(torch.bfloat16)
+print("\n5. 无 NZ 的 FP 参考")
+weight_fp = (w_i8.npu().to(torch.float32) * s_npu.to(torch.float32) + o_npu.to(torch.float32)).to(torch.bfloat16)
 expected = (x.to(torch.float32) @ weight_fp.to(torch.float32)).to(torch.bfloat16)
-print(f"   Expected: {expected}")
+print(f"   Expected (纯 FP): {expected[0,0,:4]}")
