@@ -120,14 +120,46 @@ msmodelslim quant \
 - 量化速度更快（每层 ~1s vs ~3s），不需要 IterSmooth（激活平滑）步骤
 - 模型文件更小：**3.1 GB**，仅 1 个 `.safetensors`
 
-**结果：❌ vLLM Ascend 后端不兼容**
-- 服务启动正常，API 正常响应
-- 但模型输出为**乱码**（随机 unicode 字符）
-- `quant_model_description.json` 中 `"model_quant_type": "W8A16"` 正确标注
-- vLLM 的 `--quantization ascend` **只支持 W8A8，不支持 W8A16**
-- GSM8K 得分 **0%**（模型输出完全不可用）
+**结果：❌ 推理路径全部走通但输出完全乱码**
+- 服务启动正常，API 正常响应（1319/1319 全部 HTTP 200）
+- 模型加载正常（2.40 秒，4.14 GB 显存）
+- 编译 & CUDA Graph 捕获正常（11 秒）
+- 推理吞吐 ~103 tok/s，平均输出 1363 token
+- **GSM8K 得分 0%** — 模型确实生成了文本，但全是乱码
 
-**结论：当前 vLLM + Ascend NPU 环境下，W8A16 不可用。**
+**详细的日志分析（`vllm_base_w8a16.log`）：**
+
+| 时间戳 | 事件 | 结论 |
+|--------|------|------|
+| 15:24:30 | `Using the vLLM Ascend modelslim Quantization now!` | ✅ 量化模块被正确激活（BASE 版 `modelslim_config.py:383`） |
+| 15:24:32 | 加载 safetensors 结束（3.05 GiB，1 shard） | ✅ 权重加载正常 |
+| 15:24:37 | 模型权重占用 4.1365 GB | ✅ 无异常 |
+| 15:24:41-15:25:07 | 编译 & Graph 捕获 | ✅ 全部成功，无异常 |
+| 15:25:07 | 空闲显存 60.61/60.96 GiB | ✅ 资源正常 |
+| 15:26:32-16:41:45 | 1319 个请求，全部 HTTP 200 | ✅ 服务无报错 |
+| 最终 | GSM8K Score = **0** | ❌ 完全乱码 |
+
+**关键发现：**
+- **整个日志中没有 ERROR/WARNING 关于算子错误、fallback、`NotImplementedError` 等。** 量化路径干净地执行了，但结果全部是垃圾。
+- 唯一的 `WARNING` 是 PyTorch 2.11 关于 `maybe_pad_and_reduce` / `maybe_chunk_residual` 的 deprecation 警告，与量化无关。
+
+**根因推测（待验证）：`scale`/`offset` 的 dtype 问题**
+- ModelSlim 量化时，`create_weights` 指定 `params_dtype=torch.bfloat16`
+- 但 safetensors 中保存的 `weight_scale` 和 `weight_offset` 是 **float32**（ModelSlim 默认为 float32）
+- vLLM 的 `weight_loader` 用 `copy_()` 把 float32 数据直接拷入 bf16 张量
+- 在 CANN/PyTorch 上，跨 dtype 的 `copy_()` **不会自动转换**，导致 scale/offset 被逐字节按 bf16 重新解释 → 数值完全错误
+- **W8A8 正常工作** 是因为 W8A8 用的是 `smooth_scale`（已内联到激活值中），不需要额外的 scale/offset 张量，不存在此问题
+
+**下一步建议：**
+1. 在 `process_weights_after_loading` 中加日志打印 `weight_scale.dtype` 确认
+2. 如果 scale 是 float32，统一转为 bf16：
+   ```python
+   layer.weight_scale.data = layer.weight_scale.data.flatten().to(torch.bfloat16)
+   layer.weight_offset.data = layer.weight_offset.data.flatten().to(torch.bfloat16)
+   ```
+3. 重新启动 W8A16 服务验证
+
+**结论：当前 vLLM + Ascend NPU 环境下，W8A16 推理路径可执行但输出乱码，疑似 scale/offset 的 dtype 隐式转换问题（float32 → bf16 时未正确转换）。**
 
 ---
 
