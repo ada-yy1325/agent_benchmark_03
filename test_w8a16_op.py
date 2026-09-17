@@ -4,7 +4,6 @@ import torch_npu
 
 ACL_FORMAT_FRACTAL_NZ = 2
 
-# 模拟真实 W8A16 权重
 K, N = 2560, 4096
 w_i8 = torch.randint(-127, 127, (K, N), dtype=torch.int8)
 s = torch.randn(N, dtype=torch.bfloat16).abs() * 0.001
@@ -15,9 +14,7 @@ print(f"   shape: {w_i8.shape} dtype: {w_i8.dtype}")
 
 # 转为 NZ 格式（模拟 maybe_trans_nz）
 w_nz = torch_npu.npu_format_cast(w_i8.npu(), ACL_FORMAT_FRACTAL_NZ)
-print(f"\n2. NZ format 转换:")
-print(f"   shape: {w_nz.shape}")
-print(f"   is_nz: {w_nz.npu_format == ACL_FORMAT_FRACTAL_NZ}")
+print(f"\n2. NZ format 转换: shape={w_nz.shape}")
 
 x = torch.randn(1, 128, K, dtype=torch.bfloat16).npu()
 s_npu = s.npu()
@@ -46,7 +43,7 @@ try:
     out2_ok = True
 except Exception as e:
     print(f"   FAIL: {e}")
-    print(f"   ❗ NZ format 不被支持 → root cause of garbled output")
+    print("   ❗ NZ format 不被支持 → 可能就是乱码根因")
 
 print("\n5. 无 NZ 的 FP 参考")
 weight_fp = (w_i8.npu().to(torch.float32) * s_npu.to(torch.float32) + o_npu.to(torch.float32)).to(torch.bfloat16)
