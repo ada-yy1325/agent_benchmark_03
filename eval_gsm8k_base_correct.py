@@ -1,11 +1,13 @@
 """
 GSM8K Corrected Evaluation for Qwen3-4B-Base
 ==============================================
-Uses /v1/completions (not chat) with lm-eval standard 8-shot CoT prompt,
-to match the official Qwen3 evaluation methodology.
+Uses /v1/completions (not chat) with the official Qwen3 paper methodology:
+- 4-shot CoT (from Qwen3 tech report §3.3)
+- Answer: / Final answer: format
+- temperature=0, greedy decoding
 
 Usage:
-  python3 eval_gsm8k_base_correct.py
+  python3 eval_gsm8k_base_correct.py [--api_url <url>] [--max_questions <N>]
 
 Requires: vLLM server running on port 8802 (FP16) or 8803 (W8A8)
 """
@@ -20,48 +22,51 @@ import requests
 # ── Config (defaults, overridable via CLI) ──────────────────────────────
 API_URL = "http://127.0.0.1:8802/v1/completions"
 MODEL_NAME = "Qwen3-4B-Base"
-MAX_TOKENS = 4096
+MAX_TOKENS = 2048
 TEMPERATURE = 0.0
 TOP_P = 1.0
-FEW_SHOT_COUNT = 8
-# ── 8-shot GSM8K examples (lm-eval standard format) ────────────────────
+SEED = 42
+FEW_SHOT_COUNT = 4
+# ── 4-shot GSM8K examples (Qwen3 official paper format) ────────────────
+# Format: Question / Answer (CoT reasoning) / Final answer: <number>
 FEW_SHOT_EXAMPLES = """Question: There are 15 trees in the grove. Grove workers will plant trees in the grove today. After they are done, there will be 21 trees. How many trees did the grove workers plant today?
-Let's think step by step. There are 15 trees originally. Then there were 21 trees after some more were planted. So there must have been 21 - 15 = 6 trees planted. The answer is 6.
+Answer: There are 15 trees originally. Then there were 21 trees after some more were planted. So there must have been 21 - 15 = 6 trees planted.
+Final answer: 6
 
 Question: If there are 3 cars in the parking lot and 2 more cars arrive, how many cars are in the parking lot?
-Let's think step by step. There are originally 3 cars. 2 more cars arrive. 3 + 2 = 5. The answer is 5.
+Answer: There are originally 3 cars. 2 more cars arrive. 3 + 2 = 5.
+Final answer: 5
 
 Question: Leah had 32 chocolates and her sister had 42. If they ate 35, how many pieces do they have total in total?
-Let's think step by step. Originally, Leah had 32 chocolates. Her sister had 42. So in total they had 32 + 42 = 74. After eating 35, they had 74 - 35 = 39. The answer is 39.
+Answer: Originally, Leah had 32 chocolates. Her sister had 42. So in total they had 32 + 42 = 74. After eating 35, they had 74 - 35 = 39.
+Final answer: 39
 
 Question: Jason had 20 lollipops. He gave Denny some lollipops. Now Jason has 12 lollipops. How many lollipops did Jason give to Denny?
-Let's think step by step. Jason started with 20 lollipops. Then he had 12 after giving some to Denny. So he gave 20 - 12 = 8 lollipops to Denny. The answer is 8.
-
-Question: Shawn has five toys. For Christmas, he got two toys each from his mom and dad. How many toys does he have now?
-Let's think step by step. Shawn started with 5 toys. He got 2 from mom and 2 from dad, so he got 4 more. 5 + 4 = 9. The answer is 9.
-
-Question: There were nine computers in the server room. Five more computers were installed each day, from monday to thursday. How many computers are now in the server room?
-Let's think step by step. There were originally 9 computers. For each of 4 days, 5 more computers were added. So 5 * 4 = 20 computers were added. 9 + 20 = 29. The answer is 29.
-
-Question: Michael had 58 golf balls. On tuesday, he lost 23 golf balls. On wednesday, he lost 2 more. How many golf balls did he have at the end of wednesday?
-Let's think step by step. Michael started with 58 golf balls. He lost 23 on Tuesday, so he had 58 - 23 = 35. Then he lost 2 more on Wednesday, so he had 35 - 2 = 33. The answer is 33.
-
-Question: Olivia has $23. She bought five bagels for $3 each. How much money does she have left?
-Let's think step by step. Olivia had 23 dollars. Each bagel cost 3 dollars, and she bought 5. So she spent 5 * 3 = 15 dollars. She has 23 - 15 = 8 dollars left. The answer is 8."""
+Answer: Jason started with 20 lollipops. Then he had 12 after giving some to Denny. So he gave 20 - 12 = 8 lollipops to Denny.
+Final answer: 8"""
 
 
 def build_prompt(question: str) -> str:
-    return f"{FEW_SHOT_EXAMPLES}\n\nQuestion: {question}\nLet's think step by step."
+    """Build the prompt: 4-shot examples + test question."""
+    return f"{FEW_SHOT_EXAMPLES}\n\nQuestion: {question}\nAnswer:"
 
 
 def extract_answer(text: str) -> str | None:
+    # Priority 1: "Final answer: X" (official paper format)
+    match = re.search(r'Final answer:\s*\$?\s*([+-]?\d+\.?\d*)', text, re.IGNORECASE)
+    if match:
+        raw = match.group(1)
+        return raw.rstrip(".")
+    # Priority 2: "The answer is X" (alternative format)
     match = re.search(r'The answer is\s*\$?\s*([+-]?\d+\.?\d*)', text, re.IGNORECASE)
     if match:
         raw = match.group(1)
         return raw.rstrip(".")
+    # Priority 3: \boxed{X}
     match = re.search(r'\\?boxed\{\$?\s*([+-]?\d+\.?\d*)\}', text)
     if match:
         return match.group(1)
+    # Priority 4: ANSWER: X (fallback)
     match = re.search(r'ANSWER:\s*\$?\s*([+-]?\d+\.?\d*)', text, re.IGNORECASE)
     if match:
         return match.group(1).rstrip(".")
@@ -76,7 +81,7 @@ def call_model(prompt: str, url: str) -> tuple:
         "max_tokens": MAX_TOKENS,
         "temperature": TEMPERATURE,
         "top_p": TOP_P,
-        "seed": 42,
+        "seed": SEED,
     }
     try:
         resp = requests.post(url, json=payload, timeout=120)
@@ -102,7 +107,7 @@ def main():
 
     print(f"GSM8K Evaluation (Corrected) — {MODEL_NAME}{scope_label}")
     print(f"  API: {api_url}")
-    print(f"  Few-shot: {FEW_SHOT_COUNT}-shot (lm-eval standard)")
+    print(f"  Few-shot: {FEW_SHOT_COUNT}-shot CoT (Qwen3 official paper §3.3)")
     print(f"  Format: /v1/completions (raw prompt, no chat template)\n")
 
     print("Loading GSM8K dataset...")
