@@ -20,7 +20,7 @@ import requests
 # ── Config (defaults, overridable via CLI) ──────────────────────────────
 API_URL = "http://127.0.0.1:8802/v1/completions"
 MODEL_NAME = "Qwen3-4B-Base"
-MAX_TOKENS = 1024
+MAX_TOKENS = 2048
 TEMPERATURE = 0.0
 TOP_P = 1.0
 FEW_SHOT_COUNT = 8
@@ -55,14 +55,14 @@ def build_prompt(question: str) -> str:
 
 
 def extract_answer(text: str) -> str | None:
-    match = re.search(r'The answer is\s*([+-]?\d+\.?\d*)', text, re.IGNORECASE)
+    match = re.search(r'The answer is\s*\$?\s*([+-]?\d+\.?\d*)', text, re.IGNORECASE)
     if match:
         raw = match.group(1)
         return raw.rstrip(".")
-    match = re.search(r'\\?boxed\{([+-]?\d+\.?\d*)\}', text)
+    match = re.search(r'\\?boxed\{\$?\s*([+-]?\d+\.?\d*)\}', text)
     if match:
         return match.group(1)
-    match = re.search(r'ANSWER:\s*([+-]?\d+\.?\d*)', text, re.IGNORECASE)
+    match = re.search(r'ANSWER:\s*\$?\s*([+-]?\d+\.?\d*)', text, re.IGNORECASE)
     if match:
         return match.group(1).rstrip(".")
     return None
