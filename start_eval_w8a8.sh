@@ -13,10 +13,6 @@ sleep 2
 # Clean up old results
 rm -f eval_w8a8.log eval_gsm8k_base_correct_results_w8a8.json
 
-# Ensure eval script is the stable version (552d823)
-echo "[$(date '+%H:%M:%S')] Checking out stable eval script..."
-git checkout 552d823 -- eval_gsm8k_base_correct.py
-
 # Start W8A8 vLLM server in tmux
 echo "[$(date '+%H:%M:%S')] Starting W8A8 vLLM server (port 8803)..."
 tmux kill-session -t vllm_w8a8 2>/dev/null || true
@@ -41,7 +37,7 @@ done
 # Run eval in background
 echo "[$(date '+%H:%M:%S')] Starting GSM8K eval (W8A8)..."
 python3 -u eval_gsm8k_base_correct.py \
-  --api_url http://127.0.0.1:8803/v1/completions \
+  --port 8803 \
   > eval_w8a8.log 2>&1 &
 EVAL_PID=$!
 echo "[$(date '+%H:%M:%S')] Eval PID: $EVAL_PID"
