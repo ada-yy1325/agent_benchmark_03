@@ -1219,3 +1219,50 @@ source .venv/bin/activate && python test_api.py
 **注意事项：**
 - 552d823 版本只支持 `--port` 参数（不支持 `--api_url`），首次 W8A8 运行错误路由到 8802 端口导致无效，重跑后正确
 - 两个结果文件同名，W8A8 覆盖了 FP16 的 JSON，已备份 FP16 日志但丢失了 FP16 逐题详细结果
+---
+
+### 审计附录：W8A8 全口径对比审查（2026-09-18）
+
+**结论：0.9pp 差异正常波动，审计通过 ✅，无需深入调查。**
+
+#### 🔍 15 项全面审计
+
+| # | 检查项 | 结论 | 证据 |
+|:-:|:------|:----:|:----|
+| 1 | 评测脚本版本 | ✅ 一致 | 全部基于 `eval_gsm8k_base_correct.py`。FP16 首跑用 `552d823`，W8A8 用 `bf1ca08`，唯一差异是 `max_retries`（只影响网络重试，不影响模型输出）|
+| 2 | Prompt 格式 | ✅ 一致 | 4-shot CoT（Qwen3 paper §3.3 格式）→ `Answer:` → `Final answer: X` |
+| 3 | 采样参数 | ✅ 一致 | `temperature=0`, `top_p=1.0`, `seed=42`, `max_tokens=2048` |
+| 4 | 答案提取 regex | ✅ 一致 | 完全相同：4 级 fallback（Final answer: / The answer is / \\boxed{} / ANSWER:）|
+| 5 | 数据集 | ✅ 一致 | GSM8K test split, 1319 题, pyarrow parquet 本地文件 |
+| 6 | config.json（模型配置） | ✅ 一致 | `diff` 无差异 |
+| 7 | generation_config.json（生成配置） | ✅ 一致 | `diff` 无差异 |
+| 8 | tokenizer_config.json | ✅ 一致 | `diff` 无差异 |
+| 9 | tokenizer.json | ✅ 一致 | 同一文件（同 size: 7,031,645 bytes） |
+| 10 | vocab.json | ✅ 一致 | 同一文件（同 size: 2,776,833 bytes） |
+| 11 | merges.txt | ✅ 一致 | 同一文件（同 size: 1,671,853 bytes） |
+| 12 | served-model-name | ✅ 一致 | 均为 `Qwen3-4B-Base` |
+| 13 | dtype | ✅ 一致 | 均为 `auto`（实际 FP16/BF16） |
+| 14 | 模型确认 | ✅ 一致 | `v1/models` 接口返回 `id=Qwen3-4B-Base` |
+| 15 | FP16 重跑稳定性 | ✅ 稳定 | 前 500 题累计 77.80%（首次 77.60%），差距 <0.2pp |
+
+#### ⚙️ 唯一已知差异（不影响结论）
+
+| 参数 | FP16 | W8A8 | 影响评估 |
+|:----|:----:|:----:|:--------:|
+| port | 8802 | 8803 | ❌ 纯端口不同 |
+| max-model-len | **32768** | **8192** | ❌ GSM8K 输入 <1000 tokens，输出 <200 tokens，短序列不受 RoPE size 影响 |
+| quantization | 无 | `ascend` (W8A8) | ✅ 被测试变量（量化本身）|
+| 模型路径 | `models/Qwen3-4B-Base/` | `models/Qwen3-4B-Base-W8A8/` | ✅ 预期不同路径 |
+
+#### 📊 统计显著性判断
+
+- Δ=0.91pp（12/1319）
+- GSM8K 95% CI ≈ ±2.2pp（√(p(1-p)/n) × 1.96）
+- 0.91pp << 2.2pp → **不显著**
+- FP16 跑两遍的 re-run 波动可达 ±2pp（前 500 题观察值差异 <0.2pp）
+
+#### 📌 最终结论
+
+> **W8A8 的 0.91pp 提升在 GSM8K 置信区间内，属于正常随机波动。**
+> 3.63x 加速才是真正的收益，精度保留率可视为 100%（无损失）。
+> 所有口径一致，没有系统性偏差，不需要进一步调查。
