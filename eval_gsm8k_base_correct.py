@@ -90,7 +90,7 @@ def call_model(prompt: str, url: str) -> tuple:
         choice = data["choices"][0]
         return choice["text"], choice.get("finish_reason", "unknown")
     except Exception as e:
-        print(flush=True, f"  [ERROR] API call failed: {e}")
+        print(f"  [ERROR] API call failed: {e}", flush=True)
         return None, None
 def main():
     # ── Parse CLI args ──
@@ -105,21 +105,21 @@ def main():
     api_url = f"http://127.0.0.1:{port}/v1/completions"
     scope_label = f" (first {max_questions} questions)" if max_questions else ""
 
-    print(flush=True, f"GSM8K Evaluation (Corrected) — {MODEL_NAME}{scope_label}")
-    print(flush=True, f"  API: {api_url}")
-    print(flush=True, f"  Few-shot: {FEW_SHOT_COUNT}-shot CoT (Qwen3 official paper §3.3)")
-    print(flush=True, f"  Format: /v1/completions (raw prompt, no chat template)\n")
+    print(f"GSM8K Evaluation (Corrected) — {MODEL_NAME}{scope_label}", flush=True)
+    print(f"  API: {api_url}", flush=True)
+    print(f"  Few-shot: {FEW_SHOT_COUNT}-shot CoT (Qwen3 official paper §3.3)", flush=True)
+    print(f"  Format: /v1/completions (raw prompt, no chat template)\n", flush=True)
 
-    print(flush=True, "Loading GSM8K dataset...")
+    print("Loading GSM8K dataset...", flush=True)
     local_parquet = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gsm8k_test.parquet")
     try:
         import pyarrow.parquet as pq
         tbl = pq.read_table(local_parquet)
         dataset = [{"question": r["question"], "answer": r["answer"]} for r in tbl.to_pylist()]
     except Exception as e:
-        print(flush=True, f"  [WARN] Local parquet load failed: {e}")
+        print(f"  [WARN] Local parquet load failed: {e}", flush=True)
         # Fallback: try to download with requests
-        print(flush=True, "  Trying to download from HuggingFace Hub...")
+        print("  Trying to download from HuggingFace Hub...", flush=True)
         resp = requests.get(
             "https://huggingface.co/datasets/gsm8k/resolve/main/main/test-00000-of-00001.parquet",
             timeout=120,
@@ -131,7 +131,7 @@ def main():
         tbl = pq.read_table(local_parquet)
         dataset = [{"question": r["question"], "answer": r["answer"]} for r in tbl.to_pylist()]
     total = len(dataset)
-    print(flush=True, f"  Total questions: {total}\n")
+    print(f"  Total questions: {total}\n", flush=True)
 
     correct = 0
     errors = 0
@@ -178,19 +178,19 @@ def main():
         if (i + 1) % 100 == 0:
             elapsed = time.time() - start_time
             acc = correct / (i + 1 - errors) * 100
-            print(flush=True, f"  [{i+1}/{total}] acc={acc:.2f}% ({elapsed:.0f}s)")
+            print(f"  [{i+1}/{total}] acc={acc:.2f}% ({elapsed:.0f}s)", flush=True)
 
     elapsed = time.time() - start_time
     n_processed = min(max_questions or total, total, len(results))
     valid = n_processed - errors
     final_score = correct / valid * 100 if valid > 0 else 0
 
-    print(flush=True, )
-    print(flush=True, "=" * 60)
-    print(flush=True, f"  Final GSM8K Score: {final_score:.2f}% ({correct}/{valid})")
-    print(flush=True, f"  Processed: {n_processed}/{total} questions, Errors: {errors}")
-    print(flush=True, f"  Time: {elapsed:.0f}s")
-    print(flush=True, "=" * 60)
+    print(flush=True)
+    print("=" * 60, flush=True)
+    print(f"  Final GSM8K Score: {final_score:.2f}% ({correct}/{valid})", flush=True)
+    print(f"  Processed: {n_processed}/{total} questions, Errors: {errors}", flush=True)
+    print(f"  Time: {elapsed:.0f}s", flush=True)
+    print("=" * 60, flush=True)
 
     report = {
         "model": MODEL_NAME,
@@ -205,7 +205,7 @@ def main():
     }
     with open("eval_gsm8k_base_correct_results.json", "w") as f:
         json.dump(report, f, indent=2)
-    print(flush=True, f"\nResults saved to eval_gsm8k_base_correct_results.json")
+    print(f"\nResults saved to eval_gsm8k_base_correct_results.json", flush=True)
 
 
 if __name__ == "__main__":
