@@ -20,7 +20,7 @@ import requests
 # ── Config (defaults, overridable via CLI) ──────────────────────────────
 API_URL = "http://127.0.0.1:8802/v1/completions"
 MODEL_NAME = "Qwen3-4B-Base"
-MAX_TOKENS = 2048
+MAX_TOKENS = 4096
 TEMPERATURE = 0.0
 TOP_P = 1.0
 FEW_SHOT_COUNT = 8
