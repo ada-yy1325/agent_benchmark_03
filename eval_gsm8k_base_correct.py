@@ -73,8 +73,8 @@ def extract_answer(text: str) -> str | None:
     return None
 
 
-def call_model(prompt: str, url: str) -> tuple:
-    """Returns (text, finish_reason) or (None, None) on failure."""
+def call_model(prompt: str, url: str, max_retries: int = 3) -> tuple:
+    """Returns (text, finish_reason) or (None, None) on failure. Retries on transient errors."""
     payload = {
         "model": MODEL_NAME,
         "prompt": prompt,
@@ -83,24 +83,36 @@ def call_model(prompt: str, url: str) -> tuple:
         "top_p": TOP_P,
         "seed": SEED,
     }
-    try:
-        resp = requests.post(url, json=payload, timeout=120)
-        resp.raise_for_status()
-        data = resp.json()
-        choice = data["choices"][0]
-        return choice["text"], choice.get("finish_reason", "unknown")
-    except Exception as e:
-        print(f"  [ERROR] API call failed: {e}", flush=True)
-        return None, None
+    for attempt in range(max_retries):
+        try:
+            resp = requests.post(url, json=payload, timeout=180)
+            resp.raise_for_status()
+            data = resp.json()
+            choice = data["choices"][0]
+            return choice["text"], choice.get("finish_reason", "unknown")
+        except requests.exceptions.Timeout:
+            print(f"  [WARN] Timeout (attempt {attempt+1}/{max_retries}), retrying...", flush=True)
+            time.sleep(5)
+        except Exception as e:
+            print(f"  [ERROR] API call failed: {e}", flush=True)
+            if attempt < max_retries - 1:
+                print(f"  [WARN] Retrying ({attempt+1}/{max_retries})...", flush=True)
+                time.sleep(10)
+            else:
+                return None, None
+    return None, None
 def main():
     # ── Parse CLI args ──
     max_questions = None
     port = 8802
+    resume = False
     for i, arg in enumerate(sys.argv[1:]):
         if arg == "--max-questions" and i + 2 < len(sys.argv):
             max_questions = int(sys.argv[i + 2])
         elif arg == "--port" and i + 2 < len(sys.argv):
             port = int(sys.argv[i + 2])
+        elif arg == "--resume":
+            resume = True
 
     api_url = f"http://127.0.0.1:{port}/v1/completions"
     scope_label = f" (first {max_questions} questions)" if max_questions else ""
@@ -133,14 +145,31 @@ def main():
     total = len(dataset)
     print(f"  Total questions: {total}\n", flush=True)
 
+    # ── Resume support ──
+    CHECKPOINT_FILE = "eval_checkpoint.json"
+    start_idx = 0
+    results = []
     correct = 0
     errors = 0
-    results = []
+
+    if resume and os.path.exists(CHECKPOINT_FILE):
+        with open(CHECKPOINT_FILE) as f:
+            cp = json.load(f)
+        start_idx = cp.get("processed", 0)
+        results = cp.get("results", [])
+        correct = cp.get("correct", 0)
+        errors = cp.get("errors", 0)
+        print(f"  [RESUME] Restarting from question {start_idx+1}/{total} (correct={correct}, errors={errors})", flush=True)
+    else:
+        print("  Starting fresh run...", flush=True)
+
     start_time = time.time()
 
     for i, item in enumerate(dataset):
         if max_questions and i >= max_questions:
             break
+        if i < start_idx:
+            continue
 
         question = item["question"]
         true_answer_str = item["answer"]
@@ -175,10 +204,20 @@ def main():
             "correct": is_correct,
         })
 
-        if (i + 1) % 100 == 0:
+        if (i + 1) % 100 == 0 or (i + 1) == total:
             elapsed = time.time() - start_time
             acc = correct / (i + 1 - errors) * 100
             print(f"  [{i+1}/{total}] acc={acc:.2f}% ({elapsed:.0f}s)", flush=True)
+            # Save checkpoint
+            checkpoint = {
+                "processed": i + 1,
+                "correct": correct,
+                "errors": errors,
+                "results": results,
+            }
+            with open("eval_checkpoint.tmp", "w") as f:
+                json.dump(checkpoint, f)
+            os.replace("eval_checkpoint.tmp", "eval_checkpoint.json")
 
     elapsed = time.time() - start_time
     n_processed = min(max_questions or total, total, len(results))
@@ -207,6 +246,9 @@ def main():
         json.dump(report, f, indent=2)
     print(f"\nResults saved to eval_gsm8k_base_correct_results.json", flush=True)
 
-
+    # Clean up checkpoint after successful completion
+    if os.path.exists("eval_checkpoint.json"):
+        os.remove("eval_checkpoint.json")
+        print("  Checkpoint file cleaned up.", flush=True)
 if __name__ == "__main__":
     main()
