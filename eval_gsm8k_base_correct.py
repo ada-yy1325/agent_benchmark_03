@@ -14,8 +14,8 @@ import re
 import json
 import time
 import sys
+import os
 import requests
-from datasets import load_dataset
 
 # ── Config (defaults, overridable via CLI) ──────────────────────────────
 API_URL = "http://127.0.0.1:8802/v1/completions"
@@ -106,7 +106,25 @@ def main():
     print(f"  Format: /v1/completions (raw prompt, no chat template)\n")
 
     print("Loading GSM8K dataset...")
-    dataset = load_dataset("gsm8k", "main", split="test")
+    local_parquet = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gsm8k_test.parquet")
+    try:
+        import pyarrow.parquet as pq
+        tbl = pq.read_table(local_parquet)
+        dataset = [{"question": r["question"], "answer": r["answer"]} for r in tbl.to_pylist()]
+    except Exception as e:
+        print(f"  [WARN] Local parquet load failed: {e}")
+        # Fallback: try to download with requests
+        print("  Trying to download from HuggingFace Hub...")
+        resp = requests.get(
+            "https://huggingface.co/datasets/gsm8k/resolve/main/main/test-00000-of-00001.parquet",
+            timeout=120,
+        )
+        resp.raise_for_status()
+        with open(local_parquet, "wb") as f:
+            f.write(resp.content)
+        import pyarrow.parquet as pq
+        tbl = pq.read_table(local_parquet)
+        dataset = [{"question": r["question"], "answer": r["answer"]} for r in tbl.to_pylist()]
     total = len(dataset)
     print(f"  Total questions: {total}\n")
 
