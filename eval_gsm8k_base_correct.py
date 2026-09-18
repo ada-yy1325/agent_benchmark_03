@@ -20,7 +20,7 @@ import requests
 # ── Config (defaults, overridable via CLI) ──────────────────────────────
 API_URL = "http://127.0.0.1:8802/v1/completions"
 MODEL_NAME = "Qwen3-4B-Base"
-MAX_TOKENS = 512
+MAX_TOKENS = 1024
 TEMPERATURE = 0.0
 TOP_P = 1.0
 FEW_SHOT_COUNT = 8
@@ -166,7 +166,7 @@ def main():
             "question": question[:80],
             "true_answer": true_answer,
             "pred_answer": pred_answer,
-            "output_snippet": output[:150],
+            "output_snippet": output[:300],
             "correct": is_correct,
         })
 
