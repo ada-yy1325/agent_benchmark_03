@@ -57,13 +57,14 @@ def build_prompt(question: str) -> str:
 def extract_answer(text: str) -> str | None:
     match = re.search(r'The answer is\s*([+-]?\d+\.?\d*)', text, re.IGNORECASE)
     if match:
-        return match.group(1)
+        raw = match.group(1)
+        return raw.rstrip(".")
     match = re.search(r'\\?boxed\{([+-]?\d+\.?\d*)\}', text)
     if match:
         return match.group(1)
     match = re.search(r'ANSWER:\s*([+-]?\d+\.?\d*)', text, re.IGNORECASE)
     if match:
-        return match.group(1)
+        return match.group(1).rstrip(".")
     return None
 
 
@@ -175,13 +176,14 @@ def main():
             print(f"  [{i+1}/{total}] acc={acc:.2f}% ({elapsed:.0f}s)")
 
     elapsed = time.time() - start_time
-    valid = total - errors
+    n_processed = min(max_questions or total, total, len(results))
+    valid = n_processed - errors
     final_score = correct / valid * 100 if valid > 0 else 0
 
     print()
     print("=" * 60)
     print(f"  Final GSM8K Score: {final_score:.2f}% ({correct}/{valid})")
-    print(f"  Errors: {errors}/{total}")
+    print(f"  Processed: {n_processed}/{total} questions, Errors: {errors}")
     print(f"  Time: {elapsed:.0f}s")
     print("=" * 60)
 
@@ -191,8 +193,8 @@ def main():
         "few_shot": FEW_SHOT_COUNT,
         "score": final_score,
         "correct": correct,
-        "total_valid": valid,
-        "total": total,
+        "n_processed": n_processed,
+        "total_available": total,
         "errors": errors,
         "results": results,
     }
