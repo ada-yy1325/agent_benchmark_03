@@ -13,10 +13,11 @@ Requires: vLLM server running on port 8802 (FP16) or 8803 (W8A8)
 import re
 import json
 import time
+import sys
 import requests
 from datasets import load_dataset
 
-# ── Config ──────────────────────────────────────────────────────────────
+# ── Config (defaults, overridable via CLI) ──────────────────────────────
 API_URL = "http://127.0.0.1:8802/v1/completions"
 MODEL_NAME = "Qwen3-4B-Base"
 MAX_TOKENS = 512
@@ -66,18 +67,18 @@ def extract_answer(text: str) -> str | None:
     return None
 
 
-def call_model(prompt: str) -> str | None:
+def call_model(prompt: str, url: str = API_URL) -> str | None:
     payload = {
         "model": MODEL_NAME,
         "prompt": prompt,
         "max_tokens": MAX_TOKENS,
         "temperature": TEMPERATURE,
         "top_p": TOP_P,
-        "stop": ["Question:", "\n\n"],
+        "stop": ["Question:"],
         "seed": 42,
     }
     try:
-        resp = requests.post(API_URL, json=payload, timeout=120)
+        resp = requests.post(url, json=payload, timeout=120)
         resp.raise_for_status()
         data = resp.json()
         return data["choices"][0]["text"]
@@ -87,8 +88,20 @@ def call_model(prompt: str) -> str | None:
 
 
 def main():
-    print(f"GSM8K Evaluation (Corrected) — {MODEL_NAME}")
-    print(f"  API: {API_URL}")
+    # ── Parse CLI args ──
+    max_questions = None
+    port = 8802
+    for i, arg in enumerate(sys.argv[1:]):
+        if arg == "--max-questions" and i + 2 < len(sys.argv):
+            max_questions = int(sys.argv[i + 2])
+        elif arg == "--port" and i + 2 < len(sys.argv):
+            port = int(sys.argv[i + 2])
+
+    api_url = f"http://127.0.0.1:{port}/v1/completions"
+    scope_label = f" (first {max_questions} questions)" if max_questions else ""
+
+    print(f"GSM8K Evaluation (Corrected) — {MODEL_NAME}{scope_label}")
+    print(f"  API: {api_url}")
     print(f"  Few-shot: {FEW_SHOT_COUNT}-shot (lm-eval standard)")
     print(f"  Format: /v1/completions (raw prompt, no chat template)\n")
 
@@ -103,6 +116,9 @@ def main():
     start_time = time.time()
 
     for i, item in enumerate(dataset):
+        if max_questions and i >= max_questions:
+            break
+
         question = item["question"]
         true_answer_str = item["answer"]
 
@@ -114,7 +130,8 @@ def main():
             continue
 
         prompt = build_prompt(question)
-        output = call_model(prompt)
+        # Use the api_url from local scope
+        output = call_model(prompt, api_url)
         if output is None:
             errors += 1
             continue
