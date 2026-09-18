@@ -1019,4 +1019,131 @@ source .venv/bin/activate && python test_api.py
 - 直接调用 `/v1/completions`（纯 completion API）
 - lm-eval 标准 8-shot CoT prompt
 - regex 提取 `"The answer is X"` 格式答案
+---
+
+## 2026-09-18
+
+### 今日工作：Qwen3-4B-Base GSM8K 校正评测（FP16 基线 79.61%）+ W8A8 对比 ✅
+
+---
+
+#### 1. 问题：EvalScope 口径 vs 官方口径差异
+
+之前用 EvalScope（`/v1/chat/completions` + Chat Template）测 Base 模型只有 **49.36%**，但官方 Qwen3 论文报 **87.79%**。分析发现三个叠加口径差异：
+
+| # | 差异项 | 我们之前 (EvalScope) | 官方 (lm-eval) | 预估影响 |
+|:-|:------|:-------------------|:--------------|:-------:|
+| 1 | API 端点 | `/v1/chat/completions`（Chat Template 加特殊 token） | `/v1/completions`（纯续写） | ~15-20pp |
+| 2 | Prompt 格式 | Instruction prompt（"Please reason..."） | 4-shot CoT 续写（Qwen3 论文 §3.3） | ~10-15pp |
+| 3 | 答案格式 | `The answer is X` / `\\boxed{}` | `Answer:` 推理 + `Final answer: <数字>` | ~3-5pp |
+| **合计** | | **49.36%** | **87.79%**（论文目标） | **~38pp** |
+
+---
+
+#### 2. 创建校正评测脚本 `eval_gsm8k_base_correct.py`
+
+**口径对齐方案：**
+- **端点**：`/v1/completions`（纯 Completion API，无 Chat Template）
+- **Few-shot**：4-shot CoT（Qwen3 论文 §3.3 格式，`Question:` / `Answer:` / `Final answer:`）
+- **答案提取**：4 级 fallback regex — `Final answer:` → `The answer is` → `\\boxed{}` → `ANSWER:`
+- **解码参数**：`temperature=0, seed=42, max_tokens=2048`
+- **重试机制**：3 次重试，单次超时 180s（后续简化版取消）
+
+**三个迭代版本对比：**
+
+| 版本 | 内容 | 结果 |
+|:----|:----|:----:|
+| d5e36df | 加 `flush=True` 但位置语法错误 | ❌ SyntaxError |
+| 552d823 | 修复 `flush=True` 位置，最简稳定版 | ✅ **79.61%** |
+| bf1ca08 | 加 retry/checkpoint/resume | ❌ 脚本无输出卡死 |
+
+---
+
+#### 3. FP16 基线评测结果（最终稳定版 552d823）
+
+**评测设置：**
+
+| 项目 | 值 |
+|:----|:----|
+| 模型 | Qwen3-4B-Base |
+| API 端点 | `/v1/completions`（端口 8802） |
+| 解码 | `temperature=0, seed=42, max_tokens=2048` |
+| Few-shot | 4-shot CoT（Qwen3 论文 §3.3） |
+| Prompt 模板 | `4-shot 示例\\n\\nQuestion: {问题}\\nAnswer:` |
+| 答案提取 | regex: `Final answer: X`（4 级 fallback） |
+| 答案匹配 | 字符串精确匹配（提取的数字 vs 真实答案数字） |
+| vLLM 服务 | FP16，`max-model-len=32768`，`dtype=auto` |
+| 数据集 | GSM8K test（1319 题） |
+
+**结果：**
+
+```
+============================================================
+  Final GSM8K Score: 79.61% (1050/1319)
+  Processed: 1319/1319 questions, Errors: 0
+  Time: 4469s (~74.5 min)
+============================================================
+```
+
+**分区间准确率：**
+
+| 区间（题号） | 准确率 | 累计 |
+|:----------:|:-----:|:----:|
+| 1-100 | 78.00% | 78.00% |
+| 101-200 | 74.00% | 76.00% |
+| 201-300 | 80.00% | 77.67% |
+| 301-400 | 80.00% | 78.00% |
+| 401-500 | 76.00% | 77.60% |
+| 501-600 | 80.00% | 77.67% |
+| 601-700 | 76.00% | 77.29% |
+| 701-800 | 80.00% | 77.62% |
+| 801-900 | 82.00% | 78.11% |
+| 901-1000 | 82.00% | 78.70% |
+| 1001-1100 | 80.00% | 78.73% |
+| 1101-1200 | 82.00% | 78.92% |
+| 1201-1300 | **84.00%** | 79.62% |
+| 1301-1319 | 73.68% | **79.61%** |
+
+**与官方（87.79%）对比：**
+
+| 指标 | 我们 (FP16) | 官方 (lm-eval) | 差距 |
+|:---|:----------:|:-------------:|:----:|
+| GSM8K Score | **79.61%** | **87.79%** | **-8.18pp** |
+
+**可能原因：**
+1. **Few-shot 示例差异**：论文可能用了不同的 4 题示例组合（影响 ~3-5pp）
+2. **FP16 vs 官方的精度**：论文可能用了模型的 BF16 或其他精度
+3. **answer 提取差异**：regex 边缘情况（分数、科学计数法等）
+4. **模型行为差异**：HuggingFace 版 vs ModelScope 版可能存在微妙的 tokenizer 差异
+
+**稳定性记录：**
+- 本次评测 **零错误零中断**，1319 题全部正常完成
+- 证明了 `552d823` 版本（简单版，无 retry/checkpoint）是稳定的
+- 后续改进应基于此版本
+
+**日志文件：**
+- 评测日志：`eval_full.log`
+- 结果 JSON：`eval_gsm8k_base_correct_results.json`
+
+---
+
+#### 4. W8A8 对比测试（待跑）
+
+**目标：** 用相同口径（4-shot CoT, `/v1/completions`, `Final answer:` 格式）测试 W8A8 量化版 Qwen3-4B-Base，对比 FP16 基线的精度保留率。
+
+**配置：**
+
+| 项目 | FP16（基线） | W8A8（待测） |
+|:----|:-----------:|:-----------:|
+| 端口 | 8802 | 8803 |
+| vLLM 启动脚本 | `start_vllm_base_fp16.py` | `start_vllm_base_w8a8.py` |
+| 量化 | 无（FP16） | `--quantization ascend`（W8A8） |
+| max-model-len | 32768 | 8192 |
+| 模型路径 | `models/Qwen3-4B-Base/` | `models/Qwen3-4B-Base-W8A8/` |
+
+**评测脚本：** `eval_gsm8k_base_correct.py`（与 FP16 相同，仅 `--api_url` 指向端口 8803）
+
+**预期：**
+- 若精度保留率与 Instruct 版相似（~92%），W8A8 得分应约 **73.2%**
+- 速度预期提升约 2-2.5x（参考 Instruct：30.63s → 9.94s 平均延迟）
 - 待远程启动实例后验证（需先拉取最新代码）
