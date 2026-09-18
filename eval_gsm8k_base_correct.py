@@ -76,7 +76,6 @@ def call_model(prompt: str, url: str) -> tuple:
         "max_tokens": MAX_TOKENS,
         "temperature": TEMPERATURE,
         "top_p": TOP_P,
-        "stop": ["Question:"],
         "seed": 42,
     }
     try:
