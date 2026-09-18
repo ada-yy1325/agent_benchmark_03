@@ -68,7 +68,8 @@ def extract_answer(text: str) -> str | None:
     return None
 
 
-def call_model(prompt: str, url: str = API_URL) -> str | None:
+def call_model(prompt: str, url: str) -> tuple:
+    """Returns (text, finish_reason) or (None, None) on failure."""
     payload = {
         "model": MODEL_NAME,
         "prompt": prompt,
@@ -82,12 +83,11 @@ def call_model(prompt: str, url: str = API_URL) -> str | None:
         resp = requests.post(url, json=payload, timeout=120)
         resp.raise_for_status()
         data = resp.json()
-        return data["choices"][0]["text"]
+        choice = data["choices"][0]
+        return choice["text"], choice.get("finish_reason", "unknown")
     except Exception as e:
         print(f"  [ERROR] API call failed: {e}")
-        return None
-
-
+        return None, None
 def main():
     # ── Parse CLI args ──
     max_questions = None
@@ -150,7 +150,7 @@ def main():
 
         prompt = build_prompt(question)
         # Use the api_url from local scope
-        output = call_model(prompt, api_url)
+        output, finish_reason = call_model(prompt, api_url)
         if output is None:
             errors += 1
             continue
@@ -166,6 +166,7 @@ def main():
             "question": question[:80],
             "true_answer": true_answer,
             "pred_answer": pred_answer,
+            "finish_reason": finish_reason,
             "output_snippet": output[:300],
             "correct": is_correct,
         })
