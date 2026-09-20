@@ -47,7 +47,12 @@ def run_eval(mode: str = "fp16", smoke: int = 0):
         'seed': 42,
         'top_p': 1.0,
         'top_k': -1,
-        'max_tokens': 8192,
+        # IMPORTANT: max_tokens must leave headroom for the input prompt below the
+        # server's --max-model-len, otherwise vLLM rejects the request
+        # ("requested N output tokens ... upper bound for 0 input tokens").
+        # FP16 server: max-model-len 32768; W8A8 server: max-model-len 8192.
+        # 4096 leaves >=4096 input tokens on W8A8, ample for GPQA few_shot=0 prompts.
+        'max_tokens': 4096,
         'n': 1,
     }
 
