@@ -13,9 +13,11 @@ import json
 import os
 import sys
 import time
+
+
 def run_eval(mode: str = "fp16", smoke: int = 0):
     """Run evalscope GPQA-Diamond evaluation."""
-    
+
     if mode == "fp16":
         port = 8811
         model_name = "Qwen3-8B-FP16"
@@ -36,22 +38,20 @@ def run_eval(mode: str = "fp16", smoke: int = 0):
 
     dataset_args = {
         'gpqa_diamond': {
-            'few_shot_num': 0,  # 0-shot per task spec
+            'few_shot_num': 0,
         }
     }
-    if smoke:
-        dataset_args['gpqa_diamond']['limit'] = smoke
 
     generation_config = {
         'temperature': 0,
         'seed': 42,
         'top_p': 1.0,
         'top_k': -1,
-        'max_tokens': 2048,
+        'max_tokens': 32768,
         'n': 1,
     }
 
-    task_cfg = TaskConfig(
+    task_kwargs = dict(
         model=model_name,
         api_url=api_url,
         eval_type='openai_api',
@@ -62,6 +62,9 @@ def run_eval(mode: str = "fp16", smoke: int = 0):
         timeout=120000,
         stream=True,
     )
+    if smoke:
+        task_kwargs['limit'] = smoke  # limit at TaskConfig level
+    task_cfg = TaskConfig(**task_kwargs)
 
     print(f"[eval] TaskConfig prepared. Starting eval...", flush=True)
     sys.stdout.flush()
@@ -70,10 +73,11 @@ def run_eval(mode: str = "fp16", smoke: int = 0):
     elapsed = time.time() - start_ts
     print(f"\n[eval] Done in {elapsed:.1f}s", flush=True)
 
-    # ── Print summary from latest output ──
     parse_results(model_name, elapsed)
+
+
 def parse_results(model_name: str, elapsed: float):
-    """Parse latest evalscope output for accuracy and performance metrics."""
+    """Parse latest evalscope output for accuracy and perf metrics."""
     outputs_dir = "./outputs"
     if not os.path.isdir(outputs_dir):
         return
@@ -94,7 +98,6 @@ def parse_results(model_name: str, elapsed: float):
     jsonl_path = os.path.join(reviews_dir, jsonl_files[0])
     print(f"\n[eval] Review file: {jsonl_path}", flush=True)
 
-    # Parse review JSONL to compute accuracy
     correct = 0
     total = 0
     with open(jsonl_path) as f:
@@ -121,7 +124,6 @@ def parse_results(model_name: str, elapsed: float):
         print(f"  Total time: {elapsed:.0f}s", flush=True)
         print(f"{'=' * 60}", flush=True)
 
-    # Parse performance metrics from predictions
     preds_dir = os.path.join(latest, "predictions", model_name)
     if os.path.isdir(preds_dir):
         pred_files = [f for f in os.listdir(preds_dir) if f.endswith(".jsonl")]
