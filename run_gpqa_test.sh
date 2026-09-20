@@ -82,10 +82,13 @@ if [ "$SKIP_FP16" != "true" ]; then
     echo ""
     echo "[Step 4] Starting FP16 vLLM server..."
     
-    # Kill existing server on FP16_PORT if any
+    # Kill any lingering vLLM processes: API server on port + engine-core orphans
+    # (setproctitle 'VLLM::EngineCor') that hold NPU memory but aren't on the port.
     lsof -ti:$FP16_PORT 2>/dev/null | xargs kill -9 2>/dev/null || true
-    sleep 1
-    
+    pkill -9 -f 'start_vllm_8b' 2>/dev/null || true
+    pkill -9 -f 'VLLM::EngineCor' 2>/dev/null || true
+    sleep 2
+
     tmux new-session -d -s vllm_fp16_gpqa "cd $BASEDIR && python3 start_vllm_8b_fp16.py 2>&1 | tee vllm_fp16_gpqa.log"
     echo "  FP16 server starting (tmux: vllm_fp16_gpqa)..."
     
@@ -107,6 +110,12 @@ if [ "$SKIP_FP16" != "true" ]; then
     echo "  Running FP16 evaluation..."
     python3 eval_gpqa_qwen3_8b.py --mode fp16 --smoke $SMOKE 2>&1 | tee eval_fp16_gpqa.log
     echo "  FP16 eval complete (log: eval_fp16_gpqa.log)"
+
+    # Stop FP16 server to free NPU memory before W8A8 (both reserve ~0.9*HBM,
+    # so running them concurrently would OOM the second one).
+    tmux kill-session -t vllm_fp16_gpqa 2>/dev/null || true
+    sleep 3
+    echo "  FP16 server stopped (NPU memory freed for W8A8)."
 fi
 
 # ── Step 5: W8A8 eval ──
@@ -115,8 +124,10 @@ if [ "$SKIP_W8A8" != "true" ]; then
     echo "[Step 5] Starting W8A8 vLLM server..."
     
     lsof -ti:$W8A8_PORT 2>/dev/null | xargs kill -9 2>/dev/null || true
-    sleep 1
-    
+    pkill -9 -f 'start_vllm_8b' 2>/dev/null || true
+    pkill -9 -f 'VLLM::EngineCor' 2>/dev/null || true
+    sleep 2
+
     tmux new-session -d -s vllm_w8a8_gpqa "cd $BASEDIR && python3 start_vllm_8b_w8a8.py 2>&1 | tee vllm_w8a8_gpqa.log"
     echo "  W8A8 server starting (tmux: vllm_w8a8_gpqa)..."
     
