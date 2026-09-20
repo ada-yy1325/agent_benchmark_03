@@ -1,5 +1,34 @@
 # Logbook
 
+## 2026-09-20 — GPQA-Diamond W8A8 精度验证 (Qwen3-8B-Instruct)
+
+**目标：** 在昇腾 910B NPU 上用 GPQA-Diamond（198 题，0-shot）验证 Qwen3-8B-Instruct 的 W8A8 量化精度损失 ≤ 2pp。
+
+**计划步骤：**
+1. 创建评测脚本 `eval_gpqa_qwen3_8b.py`（evalscope TaskConfig，支持 `--mode fp16|w8a8`）
+2. 创建 FP16 vLLM 启动脚本 `start_vllm_8b_fp16.py`（端口 8811，max-model-len=32768）
+3. 创建 W8A8 vLLM 启动脚本 `start_vllm_8b_w8a8.py`（端口 8812，包含 maybe_update_config 补丁）
+4. 创建一键编排脚本 `run_gpqa_test.sh`
+5. 下载模型（ModelScope：`Qwen/Qwen3-8B` + `ZKMatrix/Qwen3-8B-w8a8-full`）
+6. Smoke test（3-5 题）→ 验证输出格式
+7. FP16 全量 198 题评测
+8. W8A8 全量 198 题评测
+
+**模型对比：**
+| 模型 | 参数量 | 量化 | 端口 | max-model-len | 权重大小 |
+|:----|:------:|:----:|:----:|:-------------:|:--------:|
+| Qwen3-8B | 8B | FP16 | 8811 | 32768 | ~16GB |
+| Qwen3-8B-W8A8 | 8B | W8A8 (ascend) | 8812 | 8192 | ~8GB |
+
+**风险：**
+- ZKMatrix/Qwen3-8B-w8a8-full 的量化配置文件格式可能不兼容（缺少 quant_model_description.json）
+- 已准备 patched maybe_update_config，优先从 MODEL_DIR 加载配置文件
+- W8A8 max-model-len 限制为 8192（常见量化限制）
+- GPQA 0-shot 默认配置可能需要调整 few_shot_num=0
+
+**状态：** ⏳ 脚本已创建，等待远程执行
+
+---
 ## 2026-09-18（续）— W8A8 vs FP16 全口径审查报告
 
 **结论：0.9pp 差异为 GSM8K 正常统计波动，审计通过 ✅，无需深入调查。**
