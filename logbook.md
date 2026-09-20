@@ -4,29 +4,92 @@
 
 **目标：** 在昇腾 910B NPU 上用 GPQA-Diamond（198 题，0-shot）验证 Qwen3-8B-Instruct 的 W8A8 量化精度损失 ≤ 2pp。
 
-**计划步骤：**
-1. 创建评测脚本 `eval_gpqa_qwen3_8b.py`（evalscope TaskConfig，支持 `--mode fp16|w8a8`）
-2. 创建 FP16 vLLM 启动脚本 `start_vllm_8b_fp16.py`（端口 8811，max-model-len=32768）
-3. 创建 W8A8 vLLM 启动脚本 `start_vllm_8b_w8a8.py`（端口 8812，包含 maybe_update_config 补丁）
-4. 创建一键编排脚本 `run_gpqa_test.sh`
-5. 下载模型（ModelScope：`Qwen/Qwen3-8B` + `ZKMatrix/Qwen3-8B-w8a8-full`）
-6. Smoke test（3-5 题）→ 验证输出格式
-7. FP16 全量 198 题评测
-8. W8A8 全量 198 题评测
+---
 
-**模型对比：**
-| 模型 | 参数量 | 量化 | 端口 | max-model-len | 权重大小 |
-|:----|:------:|:----:|:----:|:-------------:|:--------:|
-| Qwen3-8B | 8B | FP16 | 8811 | 32768 | ~16GB |
-| Qwen3-8B-W8A8 | 8B | W8A8 (ascend) | 8812 | 8192 | ~8GB |
+### 一、评测口径（详细参数）
 
-**风险：**
-- ZKMatrix/Qwen3-8B-w8a8-full 的量化配置文件格式可能不兼容（缺少 quant_model_description.json）
-- 已准备 patched maybe_update_config，优先从 MODEL_DIR 加载配置文件
-- W8A8 max-model-len 限制为 8192（常见量化限制）
-- GPQA 0-shot 默认配置可能需要调整 few_shot_num=0
+**模型：**
+| 版本 | ModelScope ID | 端口 | served-name | max-model-len | 量化 |
+|:----|:----|:----:|:----|:----:|:----:|
+| FP16 基线 | `Qwen/Qwen3-8B` | 8811 | Qwen3-8B-FP16 | 32768 | 无（原生） |
+| W8A8 量化 | `ZKMatrix/Qwen3-8B-w8a8-full` | 8812 | Qwen3-8B-W8A8 | 8192 | ascend |
 
-**状态：** ⏳ 脚本已创建，等待远程执行
+**服务端（vLLM-Ascend，`start_vllm_8b_fp16.py` / `start_vllm_8b_w8a8.py`）：**
+- FP16：`--port 8811 --max-model-len 32768 --dtype auto --gpu-memory-utilization 0.9 --trust-remote-code --enforce-eager`
+- W8A8：`--port 8812 --max-model-len 8192 --quantization ascend` + maybe_update_config 补丁（从 MODEL_DIR 加载 quant 配置）
+
+**评测端（evalscope，`eval_gpqa_qwen3_8b.py`）：**
+- 数据集：GPQA-Diamond 全量 198 题，**0-shot**（evalscope 对 gpqa_diamond 默认 `few_shot_num=0`）
+- `eval_type=openai_api`，走 `/v1/chat/completions`，Qwen3 官方 chat 模板
+- 思考模式：默认开启（自动输出 `<think>...</think>`）
+- `eval_batch_size=16`，`timeout=120000`，`stream=True`
+- 指标：`mean_acc`（答案精确匹配，`ANSWER: [LETTER]` 提取）
+
+**解码参数（FP16 与 W8A8 必须完全一致）：**
+| 参数 | 值 |
+|:----|:---:|
+| temperature | 0（贪心） |
+| seed | 42 |
+| top_p | 1.0 |
+| top_k | -1 |
+| **max_tokens** | **8192**（规格原值 2048，见困难 2） |
+| n | 1 |
+
+---
+
+### 二、遇到的问题与解决（按时间顺序）
+
+**1. `max_tokens=32768` → VLLMValidationError 崩溃**
+- 现象：FP16 服务器收到第一条请求即崩：`requested 32768 output tokens ... prompt contains 658 characters (upper bound for 0 input tokens)`。
+- 根因：`max_tokens=32768` == FP16 的 `--max-model-len 32768`，0 token 留给输入 prompt。
+- 解决：`max_tokens` 必须留输入余量。前一个 agent 改成 8192 仍错（W8A8 的 max-model-len 也是 8192 → 同样 0 余量），最终定 8192 并后续适配 W8A8 的 model-len。
+
+**2. `max_tokens=2048`（规格原值）→ 0% 准确率（截断）**
+- 现象：冒烟 5 题 0/5 = 0%，模型输出全是中途推理，没有 `ANSWER: X` 结尾。
+- 根因：Qwen3 思考模式单题推理 4800–8700 字符，2048 token 在答案输出前就截断，答案提取失效。
+- 解决：`max_tokens` 提到 8192。对照验证：2048→0/5，4096→2/5，8192→3/5（60%）。
+
+**3. NPU 显存不足（5.59/60.96 GiB free）**
+- 现象：vLLM 启动报 `Free memory on device (5.59/60.96 GiB) is less than desired GPU memory utilization (0.9, 54.86 GiB)`。
+- 根因：之前崩溃的服务留下孤儿 `VLLM::EngineCor` 进程（disk-sleep 状态），占 ~55 GiB NPU 显存，且 `lsof -ti:<port>` 查不到它。
+- 解决：启动前 `pkill -9 -f 'VLLM::EngineCor'` + `pkill -9 -f 'start_vllm_8b'`（写入 run_gpqa_test.sh）。
+
+**4. FP16 / W8A8 服务器并发 OOM**
+- 现象：`run_gpqa_test.sh` 没停 FP16 就启动 W8A8，两者各 reserve ~0.9×HBM（54.86 GiB），第二个必 OOM。
+- 解决：FP16 eval 结束后 `tmux kill-session -t vllm_fp16_gpqa` + sleep 3，再启动 W8A8。
+
+**5. W8A8 模型 MXFP8 格式不兼容（未解决）**
+- 现象：`aclnnDynamicMxQuant failed ... socVersion [ascend910b] does not support opType [DynamicMxQuant]`。
+- 根因：`ZKMatrix/Qwen3-8B-w8a8-full` 的 `quant_model_description.json` 是 `W8A8_MXFP8`（FP8 微缩放），910B + 当前 CANN 不支持该算子；而之前 4B 用的 `W8A8_DYNAMIC`（INT8）是支持的。
+- 状态：**未解决**。需换 INT8 预量化模型，或用新 msmodelslim API 自己量化（旧 `quantize()` 已改为 `NaiveQuantizationApplication` 类，旧脚本失效）。
+
+**6. 40 分钟同步 exec 断连杀进程**
+- 现象：`inspire notebook exec` 跑 40 分钟评测，连接断开（exit 14），前台评测进程被杀，停在 51/198。
+- 根因：同步 exec 超过连接时长，断开时带走前台进程（vLLM 在 tmux 里存活）。
+- 解决：评测改放 tmux（`tmux new-session -d -s fp16_eval '... eval ...'`）脱离 exec 存活；evalscope 无缓存续跑（`0 already fully cached`），从 0 重跑。
+
+---
+
+### 三、最终结果
+
+**FP16 基线（全量 198 题）：✅ 91/198 = 45.96%**
+
+| 指标 | 值 |
+|:----|:---:|
+| mean_acc | 0.4596 |
+| 平均 TTFT | 105.4 ms |
+| 平均 TPOT | 27.3 ms |
+| 总耗时 | 2135 s（约 36 分钟） |
+
+**W8A8：** ❌ 阻塞（MXFP8 不兼容，见困难 5）。
+
+---
+
+### 四、待办
+
+- [ ] W8A8：解决 MXFP8 不兼容（找 INT8 预量化模型，或用新 msmodelslim API 量化 INT8）
+- [ ] W8A8：max-model-len 需 ≥ ~9216 以适配 max_tokens=8192（当前 8192 会 0 余量）
+- [ ] 完成 FP16 vs W8A8 精度对比表（准确率 + 延迟 + TTFT + TPOT + 吞吐 + 总耗时）
 
 ---
 ## 2026-09-18（续）— W8A8 vs FP16 全口径审查报告
