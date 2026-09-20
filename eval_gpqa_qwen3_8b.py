@@ -37,9 +37,7 @@ def run_eval(mode: str = "fp16", smoke: int = 0):
     from evalscope import TaskConfig, run_task
 
     dataset_args = {
-        'gpqa_diamond': {
-            'few_shot_num': 0,
-        }
+        'gpqa_diamond': {},
     }
 
     generation_config = {
@@ -47,12 +45,9 @@ def run_eval(mode: str = "fp16", smoke: int = 0):
         'seed': 42,
         'top_p': 1.0,
         'top_k': -1,
-        # IMPORTANT: max_tokens must leave headroom for the input prompt below the
-        # server's --max-model-len, otherwise vLLM rejects the request
-        # ("requested N output tokens ... upper bound for 0 input tokens").
-        # FP16 server: max-model-len 32768; W8A8 server: max-model-len 8192.
-        # 4096 leaves >=4096 input tokens on W8A8, ample for GPQA few_shot=0 prompts.
-        'max_tokens': 4096,
+        # Spec: max_tokens=2048. Must stay below the server's --max-model-len
+        # (FP16 32768 / W8A8 8192) to leave input headroom.
+        'max_tokens': 2048,
         'n': 1,
     }
 
