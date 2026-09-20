@@ -47,7 +47,7 @@ def run_eval(mode: str = "fp16", smoke: int = 0):
         'seed': 42,
         'top_p': 1.0,
         'top_k': -1,
-        'max_tokens': 32768,
+        'max_tokens': 8192,
         'n': 1,
     }
 
@@ -141,13 +141,14 @@ def parse_results(model_name: str, elapsed: float):
                         rec = json.loads(line)
                         msgs = rec.get("messages", [])
                         for msg in msgs:
-                            perf = msg.get("perf_metrics", {})
-                            if perf.get("latency"):
-                                latencies.append(perf["latency"])
-                            if perf.get("ttft"):
-                                ttfts.append(perf["ttft"])
-                            if perf.get("tpot"):
-                                tpots.append(perf["tpot"])
+                            perf = msg.get("perf_metrics")
+                            if perf:
+                                if perf.get("latency"):
+                                    latencies.append(perf["latency"])
+                                if perf.get("ttft"):
+                                    ttfts.append(perf["ttft"])
+                                if perf.get("tpot"):
+                                    tpots.append(perf["tpot"])
                     except json.JSONDecodeError:
                         pass
             if latencies:
