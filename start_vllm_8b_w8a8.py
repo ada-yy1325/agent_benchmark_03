@@ -16,7 +16,9 @@ _functorch_cfg.bypass_autograd_cache_key = True
 print("[patcher] ✓ AOTAutogradCache disabled", flush=True)
 
 # ── Step 2: Define MODEL_DIR ──
-MODEL_DIR = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/Qwen3-8B-W8A8"
+# NOTE: /inspire/ shared filesystem does NOT support symlink resolution.
+# Use the real path directly instead of models/Qwen3-8B-W8A8 symlink.
+MODEL_DIR = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/ZKMatrix/Qwen3-8B-w8a8-full"
 
 # ── Step 3: Patch maybe_update_config ──
 import vllm_ascend.quantization.modelslim_config as modelslim_cfg
