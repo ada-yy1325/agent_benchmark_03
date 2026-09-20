@@ -45,9 +45,10 @@ def run_eval(mode: str = "fp16", smoke: int = 0):
         'seed': 42,
         'top_p': 1.0,
         'top_k': -1,
-        # Spec: max_tokens=2048. Must stay below the server's --max-model-len
-        # (FP16 32768 / W8A8 8192) to leave input headroom.
-        'max_tokens': 2048,
+        # Spec: max_tokens=2048 was too small — Qwen3 thinking-mode reasoning
+        # (4800-8700 chars) got truncated before the 'ANSWER: X' line -> 0% acc.
+        # Raised to 8192 (still < FP16 32768 / W8A8 needs model-len>=~9216).
+        'max_tokens': 8192,
         'n': 1,
     }
 
