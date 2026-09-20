@@ -75,6 +75,8 @@ echo ""; echo "[Step 3] Checking W8A8 quantization config..."
 if [ -d "$MODEL_W8A8_DIR" ]; then
     echo "  JSON files in W8A8 model dir:"
     find "$MODEL_W8A8_DIR" -maxdepth 1 -name "*.json" 2>/dev/null | head -10
+fi
+
 # ── Step 4: FP16 eval ──
 if [ "$SKIP_FP16" != "true" ]; then
     echo ""
