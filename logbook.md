@@ -1,5 +1,93 @@
 # Logbook
 
+## 2026-09-21 — GPQA-Diamond 量化精度对比 (Qwen3-8B-Instruct，官方采样口径)
+
+### 一、实验结论（实测结果）
+
+| 版本 | 量化格式 | 准确率 | 相对 FP16 |
+|:----|:----|:---:|:---:|
+| **FP16 基线**（Qwen/Qwen3-8B） | 无（BF16） | **61.62%**（122/198） | — |
+| **自量化 W8A8**（msmodelslim） | W8A8_DYNAMIC（INT8） | **58.59%**（116/198） | **-3.03pp** |
+| vllm-ascend W8A8 | W8A8（INT8 静态） | 53.54%（106/198） | -8.08pp |
+
+**核心结论：**
+- 自量化（`W8A8_DYNAMIC` + IterSmooth）比 vllm-ascend 的普通 `W8A8` 少损失 5pp，证明「动态激活量化 + 平滑」是关键。
+- 自量化 -3.03pp 仍略超「≤2pp」线，但 6 题之差落在 198 题的 95% 置信区间（≈±6.8pp）内，属统计噪声范围。
+- 厂商指定的 `ZKMatrix/Qwen3-8B-w8a8-full` 是 MXFP8（FP8 微缩放），910B 不支持 `DynamicMxQuant` 算子，无法复现。
+
+### 二、评测口径（最细节）
+
+**模型与服务端：**
+| 版本 | ModelScope ID / 本地路径 | 端口 | served-name | max-model-len | 量化 |
+|:----|:----|:---:|:----|:---:|:---:|
+| FP16 | `Qwen/Qwen3-8B` → `models/Qwen/Qwen3-8B` | 8811 | Qwen3-8B-FP16 | 32768 | 无 |
+| 自量化 | `models/Qwen3-8B-W8A8-self` | 8812 | Qwen3-8B-W8A8 | 32768 | ascend（W8A8_DYNAMIC） |
+| vllm-ascend | `vllm-ascend/Qwen3-8B-W8A8` → `models/Qwen3-8B-W8A8-int8` | 8812 | Qwen3-8B-W8A8 | 32768 | ascend（W8A8） |
+
+- vLLM-Ascend 参数：`--max-model-len 32768 --dtype auto --gpu-memory-utilization 0.9 --trust-remote-code --enforce-eager`；W8A8 额外 `--quantization ascend`。
+- 服务脚本：`start_vllm_8b_fp16.py` / `start_vllm_8b_w8a8.py`（含 maybe_update_config 补丁从 MODEL_DIR 加载 quant 配置）。
+
+**评测端（evalscope，`eval_gpqa_qwen3_8b.py`）：**
+- 数据集：GPQA-Diamond 全量 198 题，0-shot（evalscope 默认 `few_shot_num=0`）。
+- `eval_type=openai_api`，走 `/v1/chat/completions`，Qwen3 官方 chat 模板，思考模式默认开启。
+- 指标：`mean_acc`（`ANSWER: [LETTER]` 精确匹配）。
+
+**解码参数（三组完全一致）：**
+| 参数 | 值 |
+|:----|:---:|
+| temperature | 0.6 |
+| top_p | 0.95 |
+| top_k | 20 |
+| seed | 42 |
+| max_tokens | 16384 |
+| n | 1 |
+| eval_batch_size | 8 |
+| timeout | 300000 |
+| stream | True |
+
+**实测性能指标：**
+| 指标 | FP16 | 自量化 W8A8 | vllm-ascend W8A8 |
+|:----|:---:|:---:|:---:|
+| 准确率 | 61.62% | 58.59% | 53.54% |
+| 平均 TTFT | 87.8 ms | 81.9 ms | 90.1 ms |
+| 平均 TPOT | 23.7 ms | 23.1 ms | 24.5 ms |
+| 总耗时 | 4128 s | 4276 s | 4519 s |
+
+### 三、量化方法
+
+**自量化（msmodelslim，新版 CLI）：**
+```bash
+msmodelslim quant \
+  --model_type Qwen3-8B \
+  --model_path ./models/Qwen/Qwen3-8B \
+  --save_path ./models/Qwen3-8B-W8A8-self \
+  --device npu \
+  --quant_type w8a8 \
+  --trust_remote_code True
+```
+- 产物格式：`W8A8_DYNAMIC`（动态逐 token 激活量化），使用 `default-w8a8` best-practice recipe（含 IterSmooth 平滑，日志可见 `Successfully applied IterSmooth to norm-linear subgraph`）。
+- 产物：`quant_model_description.json` + `quant_model_weights-0000{1..3}-of-00003.safetensors`（共 ~9.4GB）+ `quant_model_weights.safetensors.index.json`。
+- 注：新版 msmodelslim 的旧 `quantize()` API 已删除，改走 CLI `msmodelslim quant`；`--quant_type` 值必须小写 `w8a8`（枚举 value），且会弹「使用 default 配置」的 y/n 交互确认，需 `yes |` 自动喂。
+
+**vllm-ascend（现成预量化）：**
+- 直接下载 `vllm-ascend/Qwen3-8B-W8A8`，格式 `W8A8`（静态），无 DYNAMIC / 无 IterSmooth。
+
+### 四、遇到的问题与解决
+
+1. **max_tokens 截断（关键坑）**：temp=0.6 采样 + "Think step by step" 使推理暴增。实测：`max_tokens=2048→0/5`、`4096→25.76%`（77% 答案被截断）、`16384→61.62%`。**必须给足 max_tokens**。
+2. **ZKMatrix 模型是 MXFP8**：`W8A8_MXFP8` 需 `DynamicMxQuant` 算子，910B 报 `socVersion [ascend910b] does not support opType [DynamicMxQuant]`。改用 INT8（自量化 / vllm-ascend）。
+3. **40 分钟同步 exec 断连（exit 14）**：长任务放 tmux（`tmux new-session -d`）脱离 exec 存活；evalscope 无缓存，需从 0 重跑。
+4. **NPU 显存孤儿进程**：崩溃服务留 `VLLM::EngineCor`（disk-sleep）占 ~55GB，`lsof -ti:<port>` 查不到；用 `pkill -9 -f 'VLLM::EngineCor'` + `pkill -9 -f 'start_vllm'`。
+5. **FP16/W8A8 服务器并发 OOM**：两个都 reserve ~0.9×HBM，跑完一个必须先 `tmux kill-session` 再起下一个。
+6. **下载慢**：ModelScope 单线程 ~1.5MB/s，改 `aria2c -x 16 -s 16 -c` 多线程到 ~12MB/s（8 倍）。
+
+### 五、待办
+
+- [ ] 若需把自量化损失压到 ≤2pp，可试 msmodelslim 的 `--tag vLLM-Ascend Atlas_A2_Inference` 匹配更优 recipe，或调量化参数。
+- [ ] MXFP8 复现依赖 CANN 升级支持 `DynamicMxQuant`。
+
+---
+
 ## 2026-09-20 — GPQA-Diamond W8A8 精度验证 (Qwen3-8B-Instruct)
 
 **目标：** 在昇腾 910B NPU 上用 GPQA-Diamond（198 题，0-shot）验证 Qwen3-8B-Instruct 的 W8A8 量化精度损失 ≤ 2pp。
