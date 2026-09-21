@@ -46,7 +46,11 @@ def run_eval(mode: str = "fp16", smoke: int = 0):
         'seed': 42,
         'top_p': 0.95,
         'top_k': 20,
-        'max_tokens': 4096,
+        # max_tokens: spec said 4096, but temp=0.6 sampling + "Think step by step"
+        # makes reasoning explode to ~13k chars (avg) — 77% of answers got
+        # truncated before 'ANSWER: X' -> 25.76%. Raised to 16384 to eliminate
+        # truncation (FP16 max-model-len 32768, so no server change needed).
+        'max_tokens': 16384,
         'n': 1,
     }
 
