@@ -79,6 +79,29 @@ msmodelslim quant \
 
 **自量化模型来源：** 从 `Qwen/Qwen3-8B`（与 FP16 基线同一基础模型，config 完全一致）经 msmodelslim 量化得到，非第三方预量化。
 
+**两种量化方法的技术对比（为何自量化更好）：**
+
+自量化所用 recipe（msmodelslim `default-w8a8.yaml`）：
+```yaml
+process:
+  - type: iter_smooth          # ① IterSmooth 平滑（所有层），压平激活离群值
+    include: ['*']
+  - type: linear_quant
+    qconfig:
+      act:   {scope: per_token,   dtype: int8, symmetric: true, method: minmax}  # ② 动态逐 token
+      weight: {scope: per_channel, dtype: int8, symmetric: true, method: minmax} # ③ 逐通道
+    include: ['*']
+```
+
+| 维度 | vllm-ascend（53.54%） | 自量化（58.59%） |
+|:----|:----|:----|
+| 激活量化 | **静态**（quant 文件含 `input_scale`/`input_offset` 预存固定） | **动态逐 token**（`per_token` 运行时现算，quant 文件无 `input_scale`） |
+| 平滑处理 | 无（README 空模板，未说明工具） | **IterSmooth**（所有层） |
+| 权重量化 | per_channel int8 | per_channel int8 symmetric minmax |
+| 量化工具 | 未公开 | 华为 MindStudio msmodelslim |
+
+**结论：** 自量化优于 vllm-ascend 的两点关键 —— **动态逐 token 激活量化 + IterSmooth 平滑**，专治大模型激活值的离群点，把 INT8 精度损失从 8.08pp 压到 3.03pp。
+
 ### 四、遇到的问题与解决
 
 1. **max_tokens 截断（关键坑）**：temp=0.6 采样 + "Think step by step" 使推理暴增。实测：`max_tokens=2048→0/5`、`4096→25.76%`（77% 答案被截断）、`16384→61.62%`。**必须给足 max_tokens**。
