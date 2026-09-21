@@ -41,14 +41,12 @@ def run_eval(mode: str = "fp16", smoke: int = 0):
     }
 
     generation_config = {
-        'temperature': 0,
+        # Official Qwen3 Thinking-mode 口径 (Tech Report Table 17, target 62.0%):
+        'temperature': 0.6,
         'seed': 42,
-        'top_p': 1.0,
-        'top_k': -1,
-        # Spec: max_tokens=2048 was too small — Qwen3 thinking-mode reasoning
-        # (4800-8700 chars) got truncated before the 'ANSWER: X' line -> 0% acc.
-        # Raised to 8192 (still < FP16 32768 / W8A8 needs model-len>=~9216).
-        'max_tokens': 8192,
+        'top_p': 0.95,
+        'top_k': 20,
+        'max_tokens': 4096,
         'n': 1,
     }
 
@@ -58,9 +56,9 @@ def run_eval(mode: str = "fp16", smoke: int = 0):
         eval_type='openai_api',
         datasets=['gpqa_diamond'],
         dataset_args=dataset_args,
-        eval_batch_size=16,
+        eval_batch_size=8,   # thinking-mode outputs are long; smaller batch
         generation_config=generation_config,
-        timeout=120000,
+        timeout=300000,      # thinking mode is slow; generous timeout
         stream=True,
     )
     if smoke:
