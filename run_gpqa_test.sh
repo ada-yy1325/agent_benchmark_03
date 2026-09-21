@@ -5,7 +5,7 @@ set -euo pipefail
 
 BASEDIR="/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test"
 MODEL_FP16_DIR="$BASEDIR/models/Qwen/Qwen3-8B"
-MODEL_W8A8_DIR="$BASEDIR/models/ZKMatrix/Qwen3-8B-w8a8-full"
+MODEL_W8A8_DIR="$BASEDIR/models/Qwen3-8B-W8A8-int8"
 FP16_PORT=8811
 W8A8_PORT=8812
 SMOKE=0
