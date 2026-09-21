@@ -69,8 +69,15 @@ msmodelslim quant \
 - 产物：`quant_model_description.json` + `quant_model_weights-0000{1..3}-of-00003.safetensors`（共 ~9.4GB）+ `quant_model_weights.safetensors.index.json`。
 - 注：新版 msmodelslim 的旧 `quantize()` API 已删除，改走 CLI `msmodelslim quant`；`--quant_type` 值必须小写 `w8a8`（枚举 value），且会弹「使用 default 配置」的 y/n 交互确认，需 `yes |` 自动喂。
 
-**vllm-ascend（现成预量化）：**
-- 直接下载 `vllm-ascend/Qwen3-8B-W8A8`，格式 `W8A8`（静态），无 DYNAMIC / 无 IterSmooth。
+**vllm-ascend（现成预量化，来源详情）：**
+- ModelScope 仓库：`vllm-ascend/Qwen3-8B-W8A8`（owner: `vllm-ascend`，vLLM-Ascend 官方组织）
+- License：Apache License 2.0；最后更新 2025-06-05；下载量 41811
+- 总大小：11.27 GB（11274412708 bytes）
+- tags：`model_type:qwen3`、`library:safetensors`、`task:text-generation`、`deploy:swingdeploy`
+- 下载方式：`snapshot_download('vllm-ascend/Qwen3-8B-W8A8', local_dir='./models/Qwen3-8B-W8A8-int8')` 拉小文件，大权重 `quant_model_weight_w8a8.safetensors` 用 `aria2c -x 16 -s 16 -c` 从 `https://modelscope.cn/models/vllm-ascend/Qwen3-8B-W8A8/resolve/master/quant_model_weight_w8a8.safetensors` 多线程下载。
+- 量化格式：`W8A8`（静态），无 DYNAMIC / 无 IterSmooth。
+
+**自量化模型来源：** 从 `Qwen/Qwen3-8B`（与 FP16 基线同一基础模型，config 完全一致）经 msmodelslim 量化得到，非第三方预量化。
 
 ### 四、遇到的问题与解决
 
