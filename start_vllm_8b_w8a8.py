@@ -18,9 +18,9 @@ print("[patcher] ✓ AOTAutogradCache disabled", flush=True)
 # ── Step 2: Define MODEL_DIR ──
 # NOTE: /inspire/ shared filesystem does NOT support symlink resolution.
 # Use the real path directly instead of a symlink.
-# INT8 W8A8 (vllm-ascend/Qwen3-8B-W8A8), NOT the MXFP8 ZKMatrix variant
-# (910B lacks DynamicMxQuant op, so MXFP8 cannot run).
-MODEL_DIR = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/Qwen3-8B-W8A8-int8"
+# Self-quantized INT8 W8A8 via msmodelslim (W8A8_DYNAMIC, same as 4B),
+# produced 2026-09-21: msmodelslim quant --quant_type w8a8.
+MODEL_DIR = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/Qwen3-8B-W8A8-self"
 
 # ── Step 3: Patch maybe_update_config ──
 import vllm_ascend.quantization.modelslim_config as modelslim_cfg
