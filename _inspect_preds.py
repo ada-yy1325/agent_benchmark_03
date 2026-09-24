@@ -31,7 +31,7 @@ for i, line in enumerate(lines[:5]):
         if role == "user" and not question:
             question = content[:300]
         if role == "assistant" and not answer:
-            answer = content[:500]
+            answer = content
     
     # Also check perf metrics
     perf = msg.get("perf_metrics", {}) if msgs else {}
@@ -39,7 +39,11 @@ for i, line in enumerate(lines[:5]):
     print(f"\n{'='*60}")
     print(f"Sample {i+1}:")
     print(f"  Question [{len(question)} chars]: {question[:200]}...")
-    print(f"  Answer   [{len(answer)} chars]: {answer}")
+    print(f"  Answer length: {len(answer)} chars")
+    last_part = answer[-600:] if len(answer) > 600 else answer
+    print(f"  Last 600 chars:")
+    print(f"  '''{last_part}'''")
+    print()
     
     # Get score from review file
     rev_file = pred_file.replace("predictions", "reviews")
