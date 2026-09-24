@@ -218,3 +218,9 @@ __marimo__/
 .streamlit/secrets.toml
 
 eval_cache/.claude/settings.local.json
+# Model weights (downloaded separately on remote)
+models/
+outputs/
+*.log
+eval_*.json
+eval_checkpoint.json
