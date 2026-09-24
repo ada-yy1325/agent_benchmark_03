@@ -1,5 +1,105 @@
 # Logbook
 
+## 2026-09-24 — Meta-Llama-3.1-8B-Instruct W8A8 量化评测（MMLU，lm-eval-harness）
+
+### 一、实验结论（三组结果）
+
+| 版本 | 量化格式 | MMLU Overall | 相对 FP16 |
+|:----|:----|:---:|:---:|
+| **FP16 基线** | 无（BF16） | **68.39%** ± 0.37% | — |
+| **自量化 W8A8**（msmodelslim） | W8A8_DYNAMIC（动态 INT8 + IterSmooth） | **68.33%** ± 0.37% | **-0.06pp** ✅ |
+| RedHat W8A8（现成） | W8A8（compressed-tensors，静态） | 67.78% ± 0.38% | -0.61pp |
+
+**分项（humanities / other / social_sciences / stem）：**
+| 版本 | humanities | other | social_sciences | stem |
+|:----|:---:|:---:|:---:|:---:|
+| FP16 | 64.89% | 74.25% | 77.80% | 58.67% |
+| 自量化 W8A8 | 64.80% | 74.41% | 77.41% | 58.74% |
+| RedHat W8A8 | 64.19% | 74.19% | 76.63% | 58.20% |
+
+**核心结论：**
+- 自量化（`W8A8_DYNAMIC` + IterSmooth）把精度损失压到 **-0.06pp**（几乎无损），优于 RedHat 静态量化的 -0.61pp。
+- 但精度优势仅 +0.55pp，落在 ±0.37% 标准误差内；代价是**评测耗时慢 ~7 倍**（动态逐 token 激活量化在推理时现算 scale 的开销）。综合性价比 RedHat 更划算。
+
+### 二、评测口径（最细节）
+
+**模型与服务端：**
+| 版本 | ModelScope ID / 本地路径 | 量化 |
+|:----|:----|:----|
+| FP16 | `LLM-Research/Meta-Llama-3.1-8B-Instruct` → `models/Meta-Llama-3.1-8B-Instruct` | 无 |
+| RedHat W8A8 | `RedHatAI/Meta-Llama-3.1-8B-Instruct-quantized.w8a8` → `models/Meta-Llama-3.1-8B-Instruct-W8A8-RedHat` | compressed-tensors（静态 W8A8） |
+| 自量化 W8A8 | `models/Meta-Llama-3.1-8B-Instruct-W8A8-self`（从 FP16 基座量化） | ascend（W8A8_DYNAMIC） |
+
+**评测端（lm-eval-harness）：**
+- 数据集：MMLU（57 个子任务，~14042 题），**0-shot**。
+- 打分方式：**log-likelihood**（每题对 A/B/C/D 四个选项各算一次对数似然 → 14042×4 = **56168 个请求**）。
+- 模型类型：`--model vllm`（直接加载模型，非 HTTP 服务）。
+- 指标：`acc,none`（选项精确匹配准确率）。
+
+**vLLM 模型参数（三组完全一致）：**
+| 参数 | 值 |
+|:----|:---:|
+| tensor_parallel_size | 1 |
+| dtype | auto |
+| gpu_memory_utilization | 0.9 |
+| trust_remote_code | True |
+| max_model_len | 32768 |
+| enforce_eager | True |
+| seed | 42 |
+| num_fewshot | 0 |
+
+*唯一差异：自量化模型额外加 `quantization=ascend`（ModelSlim 格式需显式声明）；RedHat 的 compressed-tensors 由 vLLM 自动识别。*
+
+**测试用时：**
+| 版本 | 耗时 |
+|:----|:---:|
+| FP16 | ~13 分钟 |
+| RedHat W8A8 | ~11 分钟 |
+| 自量化 W8A8 | ~80 分钟（慢 ~7 倍） |
+
+### 三、模型与量化方法
+
+**自量化（msmodelslim，W8A8_DYNAMIC）：**
+```bash
+msmodelslim quant \
+  --model_type Meta-Llama-3.1-8B-Instruct \
+  --model_path ./models/Meta-Llama-3.1-8B-Instruct \
+  --save_path ./models/Meta-Llama-3.1-8B-Instruct-W8A8-self \
+  --device npu --quant_type w8a8 --trust_remote_code True
+```
+- 使用 `default-w8a8` recipe：`iter_smooth`（平滑所有层）+ `linear_quant`（act: per_token 动态逐 token int8 symmetric minmax；weight: per_channel int8 symmetric minmax）。
+- 产物格式 `W8A8_DYNAMIC`，权重 3 个分片 ~9.1GB + `quant_model_description.json`。
+
+**RedHat W8A8（compressed-tensors，静态）：**
+- `config.json` 的 quantization_config：`weights` int8 per-channel symmetric minmax（`dynamic: false`）；`input_activations` int8 symmetric（`dynamic: false`）；`output_activations: null`（输出激活不量化）；`ignore: [lm_head]`。
+- 即「静态 W8A8」，无动态逐 token、无平滑。
+
+### 四、遇到的问题与解决
+
+1. **msmodelslim「不支持 Llama」是假象 —— 真凶是 pad_token 缺失**
+   - 现象：`msmodelslim quant` 报 `InvalidModelError: You are creating default model adapter but failed`。
+   - 根因：隐藏的真实错误是 `ValueError: Asking to pad but the tokenizer does not have a padding token`。Llama tokenizer 没有 `pad_token`，msmodelslim 处理校准数据 padding 时报错，被 default adapter 的 exception_handler 包装成了误导性的 "adapter failed"。
+   - 解决：给 `tokenizer_config.json` 加 `pad_token = <|eot_id|>`（id 128009），备份为 `.bak`。之后 default 适配器顺利量化成功，无需手写 Llama 适配器。
+
+2. **lm_eval 的 tokenizer 参数名 bug（`tokenizer_path` → `tokenizer`）**
+   - 现象：`openai-completions` 报 `OSError: ... is not a local folder`（401）。
+   - 根因：lm_eval 的正确参数名是 `tokenizer`（不是 `tokenizer_path`）。`tokenizer_path` 被忽略后，lm_eval fallback 用 model 名去 HuggingFace 加载 tokenizer。
+   - 解决：改用 `tokenizer` 参数。
+
+3. **`openai-completions` 不支持 loglikelihood**
+   - 现象：`AssertionError: Prompt loglikelihoods are only supported by OpenAI's API for ['babbage-002', 'davinci-002']`。
+   - 根因：`openai-completions` 是给 OpenAI 官方 API 用的，loglikelihood 只对 babbage/davinci 开放，而 MMLU 需要 loglikelihood。
+   - 解决：改用 `--model vllm`（直接加载，FP16/RedHat 本来就是这么跑的），自量化模型加 `quantization=ascend`。
+
+4. **前一个 cline 的卡点**：想跑「自量化 W8A8」但根本没量化，直接拿 FP16 模型加 `--quantization ascend` 启动 → 报 `ModelSlim Quantization Config Not Found`。真正的自量化步骤缺失。
+
+### 五、待办
+
+- [ ] 若需用 HTTP 服务方式跑 MMLU，`run_mmlu_eval.py` 里的 `openai-completions` 需改成 `local-completions`（或 `vllm`）+ `tokenizer` 参数名，当前脚本是坏的。
+- [ ] 自量化推理慢（动态逐 token 开销），若要提速可换静态 recipe 或 `--tag vLLM-Ascend` 匹配更优 recipe。
+
+---
+
 ## 2026-09-21 — GPQA-Diamond 量化精度对比 (Qwen3-8B-Instruct，官方采样口径)
 
 ### 一、实验结论（实测结果）
