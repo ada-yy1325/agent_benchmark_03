@@ -38,7 +38,19 @@ def run_eval(mode: str = "fp16", smoke: int = 0):
 
     dataset_args = {
         'gpqa_diamond': {},
-task_kwargs = dict(
+    }
+
+    generation_config = {
+        # Meta official Llama-3.1: temperature=0.6, top_p=0.95, top_k=20
+        'temperature': 0.6,
+        'seed': 42,
+        'top_p': 0.95,
+        'top_k': 20,
+        'max_tokens': 8192,
+        'n': 1,
+    }
+
+    task_kwargs = dict(
         model=model_name,
         api_url=api_url,
         eval_type='openai_api',
@@ -61,12 +73,6 @@ task_kwargs = dict(
     print(f"\n[eval] Done in {elapsed:.1f}s", flush=True)
 
     parse_results(model_name, elapsed)
-    }
-
-    generation_config = {
-        # Meta official Llama-3.1: temperature=0.6, top_p=0.95, top_k=20
-        'temperature': 0.6,
-        'seed': 42,
 def parse_results(model_name: str, elapsed: float):
     """Parse latest evalscope output for accuracy and perf metrics."""
     outputs_dir = "./outputs"
@@ -112,7 +118,10 @@ def parse_results(model_name: str, elapsed: float):
         print(f"\n{'=' * 60}", flush=True)
         print(f"  GPQA-Diamond Results ({model_name})", flush=True)
         print(f"  Accuracy: {correct}/{total} = {correct/total*100:.2f}%", flush=True)
-preds_dir = os.path.join(latest, "predictions", model_name)
+        print(f"  Total time: {elapsed:.0f}s", flush=True)
+        print(f"{'=' * 60}", flush=True)
+
+    preds_dir = os.path.join(latest, "predictions", model_name)
     if os.path.isdir(preds_dir):
         pred_files = [f for f in os.listdir(preds_dir) if f.endswith(".jsonl")]
         if pred_files:
@@ -143,6 +152,13 @@ preds_dir = os.path.join(latest, "predictions", model_name)
                 avg_lat = sum(latencies) / len(latencies)
                 avg_ttft = sum(ttfts) / len(ttfts) if ttfts else 0
                 avg_tpot = sum(tpots) / len(tpots) if tpots else 0
+                print(f"\n  Performance ({model_name}):", flush=True)
+                print(f"    Avg latency: {avg_lat:.2f}s", flush=True)
+                print(f"    Avg TTFT:    {avg_ttft*1000:.1f}ms", flush=True)
+                print(f"    Avg TPOT:    {avg_tpot*1000:.1f}ms", flush=True)
+                print(f"    Throughput:  {1/avg_lat:.2f} req/s", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="GPQA-Diamond evaluation for Meta-Llama-3.1-8B-Instruct")
     parser.add_argument('--mode', choices=['fp16', 'w8a8'], required=True,
@@ -155,15 +171,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-                print(f"\n  Performance ({model_name}):", flush=True)
-                print(f"    Avg latency: {avg_lat:.2f}s", flush=True)
-                print(f"    Avg TTFT:    {avg_ttft*1000:.1f}ms", flush=True)
-                print(f"    Avg TPOT:    {avg_tpot*1000:.1f}ms", flush=True)
-                print(f"    Throughput:  {1/avg_lat:.2f} req/s", flush=True)
-        print(f"  Total time: {elapsed:.0f}s", flush=True)
-        print(f"{'=' * 60}", flush=True)
-        'top_p': 0.95,
-        'top_k': 20,
-        'max_tokens': 8192,
-        'n': 1,
-    }

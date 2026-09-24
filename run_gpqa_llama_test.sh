@@ -36,7 +36,7 @@ if [ "$SKIP_DOWNLOAD" != "true" ]; then
         echo "  Downloading Meta-Llama-3.1-8B-Instruct (FP16)..."
         python3 -c "
 from modelscope.hub.snapshot_download import snapshot_download
-snapshot_download('meta-llama/Meta-Llama-3.1-8B-Instruct', local_dir='$MODEL_FP16_DIR')
+snapshot_download('LLM-Research/Meta-Llama-3.1-8B-Instruct', local_dir='$MODEL_FP16_DIR')
 " 2>&1
     else
         echo "  FP16 model already exists at $MODEL_FP16_DIR"
