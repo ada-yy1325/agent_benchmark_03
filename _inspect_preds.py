@@ -1,69 +1,57 @@
 #!/usr/bin/env python3
-"""Inspect GPQA-Diamond predictions to see what the model actually answered."""
-import json, sys
+"""Detailed per-sample analysis of GPQA-Diamond predictions vs correct answers for W8A8."""
+import json, sys, os
 
-pred_file = sys.argv[1] if len(sys.argv) > 1 else None
-if not pred_file:
-    # auto-detect
-    import os, glob
-    preds = sorted(glob.glob("outputs/*/predictions/*/gpqa_diamond_default.jsonl"))
-    if not preds:
-        print("No prediction files found")
-        sys.exit(1)
-    pred_file = preds[-1]
+rev_file = None
+for d in sorted(os.listdir("outputs"), reverse=True):
+    candidate = os.path.join("outputs", d, "reviews", "Llama-3.1-8B-Instruct-W8A8", "gpqa_diamond_default.jsonl")
+    if os.path.exists(candidate):
+        rev_file = candidate
+        break
 
-print(f"Reading: {pred_file}")
-with open(pred_file) as f:
-    lines = [l.strip() for l in f if l.strip()]
+if not rev_file:
+    print("No W8A8 review file found!")
+    sys.exit(1)
 
-print(f"Total predictions: {len(lines)}")
+print(f"Review file: {rev_file}")
+print()
 
-for i, line in enumerate(lines[:5]):
-    rec = json.loads(line)
-    msgs = rec.get("messages", [])
-    
-    # Find user question and assistant answer
-    question = ""
-    answer = ""
-    for msg in msgs:
-        content = msg.get("content", "")
-        role = msg.get("role", "")
-        if role == "user" and not question:
-            question = content[:300]
-        if role == "assistant" and not answer:
-            answer = content
-    
-    # Also check perf metrics
-    perf = msg.get("perf_metrics", {}) if msgs else {}
-    
-    print(f"\n{'='*60}")
-    print(f"Sample {i+1}:")
-    print(f"  Question [{len(question)} chars]: {question[:200]}...")
-    print(f"  Answer length: {len(answer)} chars")
-    last_part = answer[-600:] if len(answer) > 600 else answer
-    print(f"  Last 600 chars:")
-    print(f"  '''{last_part}'''")
-    print()
-    
-    # Get score from review file
-    rev_file = pred_file.replace("predictions", "reviews")
-    if os.path.exists(rev_file):
-        with open(rev_file) as rf:
-            for rline in rf:
-                rline = rline.strip()
-                if not rline: continue
-                rrec = json.loads(rline)
-                rid = rrec.get("custom_fields", {}).get("origin_id", "")
-                if rid and rid == rec.get("custom_fields", {}).get("origin_id", ""):
-                    score_info = rrec.get("sample_score", {})
-                    score_val = score_info.get("score", {})
-                    acc = score_val.get("value", {}).get("acc")
-                    if acc is not None:
-                        print(f"  Score: {acc}")
-                    break
-    
-    if perf:
-        latency = perf.get("latency", 0)
-        ttft = perf.get("ttft", 0)
-        tpot = perf.get("tpot", 0)
-        print(f"  Latency: {latency:.1f}s, TTFT: {ttft*1000:.0f}ms, TPOT: {tpot*1000:.0f}ms")
+with open(rev_file) as f:
+    for line in f:
+        line = line.strip()
+        if not line: continue
+        rec = json.loads(line)
+        ss = rec.get("sample_score", {})
+        score = ss.get("score", {})
+        acc = score.get("value", {}).get("acc", "N/A")
+        extracted = score.get("extracted_prediction", "N/A")
+        full_pred = score.get("prediction", "")
+        meta = rec.get("sample_metadata", {})
+        correct_ans = meta.get("correct_answer", "N/A")
+        incorrect = meta.get("incorrect_answers", [])
+        target = rec.get("target", "?")
+        sid = rec.get("sample_id", "?")
+
+        # Find the ANSWER: line in full prediction
+        ans_pos = full_pred.rfind("ANSWER:")
+        ans_line = full_pred[ans_pos:ans_pos+80] if ans_pos >= 0 else "NO 'ANSWER:' FOUND"
+
+        print(f"{'='*65}")
+        print(f"Sample {sid}:")
+        print(f"  Extracted → '{extracted}'  |  Accuracy = {acc}")
+        print(f"  Target: {target}")
+
+        if len(incorrect) == 4:
+            opts = ["A", "B", "C", "D"]
+            for j, (opt_letter, ans_text) in enumerate(zip(opts[:4], [incorrect[0], incorrect[1], incorrect[2], correct_ans])):
+                marker = " ← CORRECT" if opt_letter == target else ""
+                predicted_marker = " ← EXTRACTED" if opt_letter == extracted else ""
+                print(f"    {opt_letter}) {ans_text[:80]}{marker}{predicted_marker}")
+        else:
+            print(f"  Correct: {correct_ans[:100]}")
+            print(f"  Incorrect options: {len(incorrect)}")
+            for j, ia in enumerate(incorrect):
+                print(f"    {j}) {ia[:100]}")
+
+        print(f"  ANSWER line: {ans_line}")
+        print()
