@@ -27,7 +27,7 @@ CLI_ARGS = [
     '--trust-remote-code',
     '--gpu-memory-utilization', '0.9',
     '--enforce-eager',
-    '--quantization', 'ascend',
+    '--quantization', 'compressed-tensors',
 ]
 
 # ── Step 4: Parse args and start vLLM ──
