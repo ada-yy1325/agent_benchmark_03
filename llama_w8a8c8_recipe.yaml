@@ -1,0 +1,43 @@
+# 自定义 W8A8C8 量化配方（Meta-Llama-3.1-8B-Instruct）
+# = default-w8a8（iter_smooth + linear_quant 动态逐 token）+ dynamic_cache（KV cache INT8 量化）
+# 参考 qwen3-32b-dense-w8a8c8.yaml 的 dynamic_cache 段；msmodelslim 无通用 w8a8c8 配方，故手写。
+# 用法：msmodelslim quant --config_path llama_w8a8c8_recipe.yaml --model_path <FP16> --save_path <out>
+apiversion: modelslim_v1
+metadata:
+  config_id: llama-3.1-8b-w8a8c8
+  score: 50.0
+  verified_model_types:
+    - Meta-Llama-3.1-8B-Instruct
+  label:
+    w_bit: 8
+    a_bit: 8
+    is_sparse: false
+    kv_cache: true
+spec:
+  process:
+    - type: iter_smooth
+      include: ['*']
+    - type: linear_quant
+      qconfig:
+        act:
+          scope: per_token
+          dtype: int8
+          symmetric: true
+          method: minmax
+        weight:
+          scope: per_channel
+          dtype: int8
+          symmetric: true
+          method: minmax
+      include: ['*']
+    - type: dynamic_cache
+      qconfig:
+        scope: per_channel
+        dtype: int8
+        symmetric: true
+        method: minmax
+      include: ['*']
+  runner: model_wise
+  save:
+    - type: ascendv1_saver
+      part_file_size: 4
