@@ -1,5 +1,54 @@
 # Logbook
 
+## 2026-09-28 — KV cache 量化实验（W8A8 基础上加 INT8/FP8 KV cache）
+
+### 一、实验目标
+
+在已自量化好的 W8A8 模型基础上，再加 KV cache 量化，验证：还能省多少显存、精度掉多少、速度快多少。
+
+### 二、实验过程与结果
+
+**1. W8A8C8 量化成功（INT8 KV cache）**
+- msmodelslim 无通用 `w8a8c8` recipe（只有 Qwen3-32B 专属），`--quant_type w8a8c8` 会**静默降级成 w8a8**（无 KV cache 量化，日志有 warning）。
+- 解决：手写配方 `llama_w8a8c8_recipe.yaml`（default-w8a8 + `dynamic_cache` 处理器：per_channel int8 symmetric minmax），用 `--config_path` 传入。
+- 产物：`models/Meta-Llama-3.1-8B-Instruct-W8A8C8-self`，quant config 含 `kv_cache_type: C8` + 每层 `k_proj/v_proj.kv_cache_scale/offset`（共 130 个 KV 字段）。
+
+**2. 显存收益已验证 ✅**
+- 同样 45.42 GiB KV cache 显存预算下，token 容量翻倍：
+  - W8A8（无 KV 量化）：371,968 tokens，最大并发 11.35x。
+  - W8A8C8 / FP8 KV：744,064 tokens（2 倍），最大并发 22.71x。
+
+**3. 推理全部崩溃 ❌（平台级限制）**
+
+| 路线 | 模型 | 结果 |
+|:----|:----|:----|
+| C8 INT8 KV cache | W8A8C8 自量化 | ❌ 推理崩（TBE 子进程崩） |
+| FP8 KV cache | W8A8 自量化 | ❌ fused attention 内核崩 |
+| FP8 KV cache（隔离测试） | FP16 原版 | ❌ 同样崩 |
+
+- **根因**：ATB（Ascend Transformer Boost）的 `ReshapeAndCacheOperation`（把 K/V 写入 KV cache 的底层算子）不支持 fp8/int8 KV cache dtype，报 `OpParamMaker.cpp:453 ReshapeAndCacheOperation setup failed`。连最简单的 6 token 生成都崩，与评测模式无关。
+
+**4. 软件栈修复尝试**
+
+| 尝试 | 结果 |
+|:----|:----|
+| torch_npu 2.11.0rc4 → stable 2.11.0 | ❌ 同样崩 |
+| torch_npu 2.12.0 | ❌ 与 CANN 9.0.0 不兼容（vLLM import 崩），且其依赖 torch==2.11.0+cpu 在华为镜像/PyPI 都没有，需从 `download.pytorch.org/whl/cpu` 装 |
+| 重启 notebook（不保存镜像） | ✅ 环境恢复原始镜像状态（torch 2.11.0+cpu + torch_npu 2.11.0.rc4） |
+
+### 三、结论
+
+- **当前镜像（ascend-a2-ubuntu:v4.2 = CANN 9.0.0 + torch_npu 2.11.0rc4 + vLLM-Ascend v0.22.1）的 ATB 算子层不支持量化 KV cache**，INT8（C8）和 FP8 两条路都跑不了，属于软件栈版本问题，改参数无解。
+- **显存收益是真实的**（KV cache 容量 2 倍），一旦换新镜像（如平台上的 `vllm-ascend:v0.26.0rc2`）大概率可用。
+
+### 四、遗留资产（换新镜像后可直接复用）
+
+- 模型：`models/Meta-Llama-3.1-8B-Instruct-W8A8C8-self`（共享盘，已含 C8 量化）。
+- 配方：`llama_w8a8c8_recipe.yaml`（已入 git，commit ac544b1）。
+- 若新镜像仍不支持，可先跑 FP8（`--kv-cache-dtype fp8`，无需重新量化）。
+
+---
+
 ## 2026-09-24 — Meta-Llama-3.1-8B-Instruct W8A8 量化评测（MMLU，lm-eval-harness）
 
 ### 一、实验结论（三组结果）
