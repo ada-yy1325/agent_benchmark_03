@@ -40,7 +40,8 @@ def try_load():
         "gpu_memory_utilization": 0.9,
         "max_model_len": 512,
         "enforce_eager": True,
-        "quantization": "deepseek_v4_fp8",
+        # 不传 quantization，让 DeepseekV4FP8Config.override_quantization_method
+        # 自动检测 model_type=="deepseek_v4" 并选择 deepseek_v4_fp8
         "cpu_offload_gb": 80,
         "dtype": "bfloat16",
         "max_num_seqs": 1,
