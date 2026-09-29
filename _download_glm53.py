@@ -10,7 +10,6 @@ if os.path.exists(local_dir):
     files = os.listdir(local_dir)
     if any(f.endswith(".safetensors") or f.endswith(".bin") or f.endswith(".pt") for f in files):
         print(f"Model already exists at {local_dir}, {len(files)} files")
-        # Count total size
         total = 0
         for root, dirs, files in os.walk(local_dir):
             for f in files:
@@ -21,20 +20,17 @@ if os.path.exists(local_dir):
 print(f"Downloading {model_id} to {local_dir}")
 print(f"Estimated size: ~640GB, this will take a long time...")
 
-# Use modelscope with multi-threaded download
 from modelscope.hub.snapshot_download import snapshot_download
 
 start = time.time()
 result = snapshot_download(
     model_id,
     local_dir=local_dir,
-    resume_download=True,
 )
 elapsed = time.time() - start
 print(f"Download completed in {elapsed/60:.1f} minutes")
 print(f"Saved to: {result}")
 
-# Count files and size
 total = 0
 for root, dirs, files in os.walk(local_dir):
     for f in files:
