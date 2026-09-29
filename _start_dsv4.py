@@ -54,7 +54,6 @@ def dummy_load():
         "enforce_eager": True,
         "dtype": "bfloat16",
         "max_num_seqs": 1,
-        "moe_backend": "vanilla",
         "load_format": "dummy",
     }
 
