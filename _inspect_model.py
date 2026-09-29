@@ -1,4 +1,19 @@
 """检查 DeepSeek V4 模型权重文件结构 - 找 expert 权重命名"""
+# 补一个：看看专家权重实际用了什么格式
+# 前一层推断 F8_E4M3 是块级量化的权重
+
+# 看看 layers.0.ffn.experts 的结构
+expert_keys = [t for t in tensors if "experts" in t]
+w1_weights = [t for t in expert_keys if "w1" in t and "scale" not in t]
+if w1_weights:
+    t = w1_weights[0]
+    print(f"\nExpert weight sample: {t}")
+    print(f"  dtype: {metadata[t].get('dtype')}, shape: {metadata[t].get('shape')}")
+w1_scales = [t for t in expert_keys if "w1" in t and "scale" in t]
+if w1_scales:
+    t = w1_scales[0]
+    print(f"Expert scale sample: {t}")
+    print(f"  dtype: {metadata[t].get('dtype')}, shape: {metadata[t].get('shape')}")
 import os
 import json
 
