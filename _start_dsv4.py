@@ -25,6 +25,7 @@ def dummy_load():
     import multiprocessing
     multiprocessing.set_start_method("spawn", force=True)
 
+os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
     # 禁用 UVA offloader（NPU 上不支持），回退到 functional_call 方案
     import os
     os.environ["VLLM_WEIGHT_OFFLOADING_DISABLE_UVA"] = "1"
@@ -76,6 +77,7 @@ def try_load():
     multiprocessing.set_start_method("spawn", force=True)
 
     # 禁用 UVA offloader（NPU 上不支持），回退到 functional_call 方案
+os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
     import os
     os.environ["VLLM_WEIGHT_OFFLOADING_DISABLE_UVA"] = "1"
 
