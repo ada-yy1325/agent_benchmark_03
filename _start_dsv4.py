@@ -78,6 +78,9 @@ def try_load():
     multiprocessing.set_start_method("spawn", force=True)
 
     os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
+    os.environ["HCCL_OVER_NIC"] = "1"
+    os.environ["HCCL_INTRA_ROCE_ENABLE"] = "0"
+    os.environ["HCCL_P2P_DISABLE"] = "1"
     # 禁用 UVA offloader（NPU 上不支持），回退到 functional_call 方案
     os.environ["VLLM_WEIGHT_OFFLOADING_DISABLE_UVA"] = "1"
 
