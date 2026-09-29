@@ -1,5 +1,62 @@
 # Logbook
 
+## 2026-09-29 — DeepSeek V4 Flash 推理排障 & GLM-5.3-Flash 下载
+
+### 一、DeepSeek V4 Flash 推理排障
+
+**模型状态：** 已完全下载 46/46 shards，149GB ✅
+
+**现象：** 运行 `_start_dsv4.py`（vLLM + Ascend 加载）在 `profile_run()` 阶段崩溃。
+
+**报错信息：**
+```
+RuntimeError: call aclnnMoeInitRoutingCustom failed, detail:EZ9999: Inner Error!
+EZ9999: quant_mode currently support -1, 1 or 0
+[FILE:moe_init_routing_custom_tiling.cpp][LINE:403]
+```
+
+**根因定位（修正）：**
+
+1. **初始误判：** 以为是 `torch_npu.npu_format_cast()` 不支持 `float4_e2m1fn_x2`（CANN 9.0.0 限制）。已通过 monkey-patch（`_patch_910b2c_fp8.py`）跳过 format_cast，但问题依旧。
+2. **实际根因：** W4A8MXFP 量化方案（`QuantType.W4A8MXFP = 6`）在 `token_dispatcher.py:374` 中触发 `quant_mode=3` 传给 `aclnnMoeInitRoutingCustom`，但 910B2C 的 CANN kernel（`moe_init_routing_custom.cpp`）只支持 `quant_mode` = -1, 0, 1。
+3. **代码链路：**
+   - `token_dispatcher.py:373-376`: `quant_mode = 3 if is_mxfp else 1`
+   - `device_op.py:62`: `torch.ops._C_ascend.npu_moe_init_routing_custom(..., quant_mode=3)`
+   - CANN kernel tiling 检查失败 → EZ9999
+
+**FP4→FP8 转换方案已否决：** ❌
+- 用户指出 4bit→8bit 是反量化，模型从 ~149GB 膨胀到 ~300GB，违背量化初衷。
+- 正确方向应该是改软件层避开 `quant_mode=3`，而非动权重格式。
+
+**可行修复方向（未实施）：**
+- 修改 `token_dispatcher.py:374`，将 `quant_mode = 3 if is_mxfp else 1` 改为 `quant_mode = 1 if is_mxfp else 1`，使路由 kernel 用 W8A8 模式而非 MXFP 模式，绕过 CANN 限制。
+- 待确认 MLP 计算 kernel（`moe_mlp.py`）是否也能处理 W4A8MXFP 权重，若 MLP 层也崩则需额外修复。
+- 用户决定先搁置，等待新版 CANN/vllm-ascend 或未来再处理。
+
+### 二、GLM-5.3-Flash 下载状态
+
+| 状态 | 数量 |
+|------|------|
+| 总 shards | **62** |
+| ✅ 已完成 | **34** |
+| 🔄 下载中（.incomplete）| **6** |
+| ⏳ 未开始 | **22** |
+| 已下载大小 | **180GB** |
+| 预估总量 | ~550GB+ |
+
+- 下载 180GB / 40 个文件 ≈ 4.5GB/文件，剩余 22 个约再下 ~100GB，估计还需数小时。
+- 下载脚本保存在远程 `/inspire/sj-ssd3/...` 共享盘，实例停止后不会丢失。
+
+### 三、技术总结
+
+| 问题 | 根因 | 状态 |
+|:----|:----|:----:|
+| DeepSeek V4 Flash MoE 路由 kernel 崩 | CANN `MoeInitRoutingCustom` 不支持 `quant_mode=3`（仅支持 -1,0,1） | ⏸️ 搁置 |
+| FP4→FP8 转换方案 | 反量化导致模型膨胀 2 倍，不合理 ❌ | 已否决 |
+| GLM-5.3-Flash 下载 | 进度 34/62（~55%），仍在进行 | ⏳ 进行中 |
+
+---
+
 ## 2026-09-28 — KV cache 量化实验（W8A8 基础上加 INT8/FP8 KV cache）
 
 ### 一、实验目标
