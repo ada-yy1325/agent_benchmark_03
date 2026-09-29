@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Try to load DeepSeek V4 Flash on Ascend 910B."""
 import argparse, json, os, sys, time
+# 必须在任何 import 之前设置 HCCL 环境变量（4 张 NPU 跨两个模块，需用 NIC 通信）
+os.environ["HCCL_OVER_NIC"] = "1"
+os.environ["HCCL_INTRA_ROCE_ENABLE"] = "1"
+os.environ["HCCL_CONNECT_TIMEOUT"] = "3600"
 
 def check_download():
     """Check download status."""
