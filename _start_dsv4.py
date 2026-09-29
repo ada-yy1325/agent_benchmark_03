@@ -22,6 +22,10 @@ def check_download():
 
 def try_load():
     """Try to load the model."""
+    # NPU 需要 spawn 而不是 fork 来初始化多进程
+    import multiprocessing
+    multiprocessing.set_start_method("spawn", force=True)
+
     model_path = "./models/DeepSeek-V4-Flash"
     print(f"Model: {model_path}")
     import torch
