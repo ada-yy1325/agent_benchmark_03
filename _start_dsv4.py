@@ -43,14 +43,13 @@ def dummy_load():
     config = {
         "model": model_path,
         "trust_remote_code": True,
-        "tensor_parallel_size": 1,
+        "tensor_parallel_size": 4,
         "gpu_memory_utilization": 0.9,
         "max_model_len": 512,
         "enforce_eager": True,
         "dtype": "bfloat16",
         "max_num_seqs": 1,
         "load_format": "dummy",
-        "cpu_offload_gb": 90,
     }
 
     print("Creating LLM with dummy config:")
@@ -94,15 +93,15 @@ def try_load():
     config = {
         "model": model_path,
         "trust_remote_code": True,
-        "tensor_parallel_size": 1,
+        "tensor_parallel_size": 4,
         "gpu_memory_utilization": 0.9,
         "max_model_len": 512,
+\"max_model_len\": 512,
         "enforce_eager": True,
         # 不传 quantization，让 DeepseekV4FP8Config.override_quantization_method
         # 自动检测 model_type=="deepseek_v4" 并选择 deepseek_v4_fp8
         # cpu_offload_gb 在 NPU 上需设置 VLLM_WEIGHT_OFFLOADING_DISABLE_UVA=1
         # 以禁用 UVA 路径，回退到 functional_call 方案
-        "cpu_offload_gb": 90,
         "dtype": "bfloat16",
         "max_num_seqs": 1,
     }
