@@ -91,6 +91,25 @@ def try_load():
     print()
     
     from vllm import LLM, SamplingParams
+    # Monkey-patch: skip Float4 format_cast unsupported on 910B2C
+    try:
+        import vllm_ascend.quantization.methods.fp8 as _fp8_module
+        _orig_process = _fp8_module.AscendW4A8MXFPDSDynamicFusedMoEMethod.process_weights_after_loading
+
+        def _patched_process(self, layer):
+            try:
+                _orig_process(self, layer)
+            except RuntimeError as e:
+                err_str = str(e)
+                if any(kw in err_str.lower() for kw in ["customize_dtype", "not supported", "float4"]):
+                    print(f"[WARN] Skipping Float4 format_cast (910B2C unsupported): {err_str[:80]}")
+                else:
+                    raise
+
+        _fp8_module.AscendW4A8MXFPDSDynamicFusedMoEMethod.process_weights_after_loading = _patched_process
+        print("[INFO] Applied monkey-patch for 910B2C Float4 format_cast")
+    except (ImportError, AttributeError) as e:
+        print(f"[INFO] No patch needed: {e}")
     
     config = {
         "model": model_path,
