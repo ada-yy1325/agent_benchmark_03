@@ -22,12 +22,12 @@ def check_download():
 
 def dummy_load():
     """Load with dummy weights to test framework path."""
+    import os
     import multiprocessing
     multiprocessing.set_start_method("spawn", force=True)
 
     os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
     # 禁用 UVA offloader（NPU 上不支持），回退到 functional_call 方案
-    import os
     os.environ["VLLM_WEIGHT_OFFLOADING_DISABLE_UVA"] = "1"
 
     model_path = "./models/DeepSeek-V4-Flash"
@@ -73,12 +73,12 @@ def dummy_load():
 def try_load():
     """Try to load the model with real weights."""
     # NPU 需要 spawn 而不是 fork 来初始化多进程
+    import os
     import multiprocessing
     multiprocessing.set_start_method("spawn", force=True)
 
-    # 禁用 UVA offloader（NPU 上不支持），回退到 functional_call 方案
     os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
-    import os
+    # 禁用 UVA offloader（NPU 上不支持），回退到 functional_call 方案
     os.environ["VLLM_WEIGHT_OFFLOADING_DISABLE_UVA"] = "1"
 
     model_path = "./models/DeepSeek-V4-Flash"
