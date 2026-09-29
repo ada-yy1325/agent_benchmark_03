@@ -25,6 +25,10 @@ def dummy_load():
     import multiprocessing
     multiprocessing.set_start_method("spawn", force=True)
 
+    # 禁用 UVA offloader（NPU 上不支持），回退到 functional_call 方案
+    import os
+    os.environ["VLLM_WEIGHT_OFFLOADING_DISABLE_UVA"] = "1"
+
     model_path = "./models/DeepSeek-V4-Flash"
     print(f"Model: {model_path} (dummy weights)")
     import torch
@@ -40,12 +44,13 @@ def dummy_load():
         "model": model_path,
         "trust_remote_code": True,
         "tensor_parallel_size": 1,
-        "gpu_memory_utilization": 0.85,
+        "gpu_memory_utilization": 0.9,
         "max_model_len": 512,
         "enforce_eager": True,
         "dtype": "bfloat16",
         "max_num_seqs": 1,
         "load_format": "dummy",
+        "cpu_offload_gb": 90,
     }
 
     print("Creating LLM with dummy config:")
@@ -71,6 +76,10 @@ def try_load():
     import multiprocessing
     multiprocessing.set_start_method("spawn", force=True)
 
+    # 禁用 UVA offloader（NPU 上不支持），回退到 functional_call 方案
+    import os
+    os.environ["VLLM_WEIGHT_OFFLOADING_DISABLE_UVA"] = "1"
+
     model_path = "./models/DeepSeek-V4-Flash"
     print(f"Model: {model_path}")
     import torch
@@ -91,8 +100,9 @@ def try_load():
         "enforce_eager": True,
         # 不传 quantization，让 DeepseekV4FP8Config.override_quantization_method
         # 自动检测 model_type=="deepseek_v4" 并选择 deepseek_v4_fp8
-        # cpu_offload_gb 在 NPU 上暂不支持（UVAOffloader 未适配）
-        # 先不加 offload，用 dummy 测试框架路径
+        # cpu_offload_gb 在 NPU 上需设置 VLLM_WEIGHT_OFFLOADING_DISABLE_UVA=1
+        # 以禁用 UVA 路径，回退到 functional_call 方案
+        "cpu_offload_gb": 90,
         "dtype": "bfloat16",
         "max_num_seqs": 1,
     }
