@@ -48,6 +48,7 @@ def run_quant():
 
     cmd = [
         "msmodelslim", "quant",
+        "--model_type", "glm_5",
         "--model_path", MODEL_DIR,
         "--save_path", SAVE_DIR,
         "--config_path", YAML_PATH,
