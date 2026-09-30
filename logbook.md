@@ -1,5 +1,178 @@
 # Logbook
 
+## 2026-09-30 — 主线回归：DeepSeek V4 Flash W8A8（今日最新）
+
+---
+
+### [最新] 15:00 - 方向修正：回归 DS V4 Flash W8A8 主线
+
+**重新理解调研问题：** "如何将 FP4 原生的 QAT 模型在 910B（仅支持 BF16/INT8）上量化部署、精度损失多少"
+- 之前跑了题搞 GLM-5.3-Flash，实际上应该延续原任务做 DS V4 Flash
+- 替代方案应该是 **DS V4 W8A8**，而非换成 GLM
+
+**关键发现：**
+- vLLM ModelRegistry 有 `DeepseekV4ForCausalLM` 和 `DeepSeekV4MTPModel` — 支持 AS ❗️
+  - 启动时日志显示：`Breakable cudagraph is force disabled on Ascend because DeepSeek V4 PIECEWISE cudagraph is not supported yet`
+- 昇腾官方一键部署文章：https://www.hiascend.com/zh/developer/techArticles/20260425-1
+  - 使用 `Eco-Tech/DeepSeek-V4-Flash-w8a8-mtp`
+  - 三步骤：`download.sh` → `install_base_sw.sh` → `install_llm.sh`（容器部署）
+- **魔搭社区已存在 W8A8 权重！** `Eco-Tech/DeepSeek-V4-Flash-w8a8-mtp`
+  - 大小：300 GB（`file_size: 300103641436`）
+  - 文件：71 个 safetensor（70×4.3 GB + 1×0.1 GB）
+  - Config：`model_type=deepseek_v4`, `architectures=['DeepseekV4ForCausalLM']`
+  - License：MIT，公开下载
+- **无非 MTP 版本存在**（`Eco-Tech/DeepSeek-V4-Flash-w8a8` 返回 404）
+
+**下一步：**
+1. 用 aria2c 加速下载 DS V4 W8A8（300 GB）
+2. vLLM 部署：`--tensor-parallel-size 16 --enable-expert-parallel --quantization ascend --enforce-eager`
+3. 测 MMLU 5-shot
+4. 对比官方成绩
+
+**备选方案：** DeepSeek-V3.2-Exp W8A8
+- 魔乐社区：`Modelers_Park/DeepSeek-V3.2-Exp-w8a8`
+- vLLM-Ascend 官方教程：https://docs.vllm.ai/projects/ascend/en/latest/tutorials/models/DeepSeek-V3.2.html
+- 16 卡配置与当前环境一致
+
+---
+
+### 14:30 - W8A8 下载加速尝试（失败）
+
+GLM-5.3-Flash-W8A8 下载尝试：
+
+| 尝试 | 方法 | 速度 | 结果 |
+|------|------|------|------|
+| 1 | ModelScope `snapshot_download(num_workers=8)` | — | 参数 `num_workers` 不存在 → 报错 |
+| 2 | ModelScope `snapshot_download(max_workers=8)` | ~530 KB/s/线程 | 总吞吐 ~4 MB/s → 预计 22 小时 ⚠️ |
+| 3 | HF 镜像 `hf-mirror.com`（`zai-org/GLM-5.3-Flash-w8a8`） | — | 模型不存在（401 Not Found）❌ |
+
+下载 6.7 GB 后被 `tmux` 进程挂掉一次，重启后又跑但速度极慢。用户叫停 → 放弃 GLM 方向。
+
+**创建的下载脚本：** `_download_w8a8.py`（已 push 但未成功执行）
+
+---
+
+### 13:30 - vLLM 环境关键检查
+
+| 检查项 | 结果 |
+|--------|------|
+| vLLM ModelRegistry 有 `glm5_next`？ | ❌ 没有，最高到 `Glm4MoeForCausalLM` |
+| vLLM ModelRegistry 有 `deepseek_v4`？ | ✅ `DeepseekV4ForCausalLM` 和 `DeepSeekV4MTPModel` |
+| CANN 版本 | **9.0.0**（GLM-5.3 需要 9.1.0） |
+| vLLM-ascend 版本 | 0.22.1rc2.dev0 |
+| Transformers 版本 | 5.17.0（含 `Glm5NextForConditionalGeneration`） |
+| Python / PyTorch | 3.13 / 2.11 + torch_npu |
+
+---
+
+### 13:00 - FP8 模型 CPU 反量化方案（未执行，被叫停）
+
+**思路：** `device_map=None` 让模型整个在 CPU 上创建 → Transformers 在 CPU 上反量化 FP8→BF16（CPU 无 FP8 限制） → `dispatch_model` 手动均匀分配到 16 卡
+
+**已准备脚本：** `_run_fp8_v2_cpu_dequant.py`
+
+**被叫停原因：** 用户指出（1）FP8 反量化 BF16 后模型 ~620 GB，不再是量化模型；（2）背离调研初衷；（3）直接等 W8A8 下载完更简单。
+
+---
+
+### 12:00 - FP8 模型 3 种加载方案均失败
+
+| 尝试 | 方法 | 失败原因 |
+|------|------|---------|
+| 1 | `device_map="auto"` | NPU 4 OOM（accelerate 不均匀分配） |
+| 2 | `device_map="auto"` + `max_memory` 限制 | NPU 4 仍然 OOM |
+| 3 | `device_map="auto"` + `torch_dtype=bf16` | **910B 不支持 FP8 运算**（error code 561103） |
+
+**FP8 三个核心问题：**
+1. **键名前缀不匹配：** checkpoint `model.language_model.*` vs 模型预期 `model.*`
+2. **gate_proj vs gate_up_proj：** checkpoint 分离 `gate_proj` + `up_proj`，模型期望融合 `gate_up_proj` → 专家权重会随机初始化
+3. **910B 不支持 FP8：** `float8_e4m3fn` 操作报错 561103
+
+**结论：** FP8 版本不是为 Transformers 原生加载设计的，需要专用镜像（quay.io/ascend/vllm-ascend:glm-5.3-flash）和 CANN 9.1.0。
+
+**创建的 FP8 相关脚本（全部失败，可归档）：**
+- `_load_glm53_autov2.py` — Auto device map 16 卡加载
+- `_load_glm53_v3.py` — 带 max_memory 限制
+- `_load_glm53_v4.py` — 不同策略组合
+- `_load_glm53_custom.py` — 自定义加载（未完成）
+- `_load_glm53_transformers_16npu.py` — Transformers 16 卡加载
+- `_run_fp8_direct.py` — 直接 FP8 推理
+- `_run_fp8_v2_cpu_dequant.py` — CPU 反量化（未执行）
+- `_check_keys.py` — 检查 checkpoint 与模型参数键名差异
+- `_check_models.py` — 检查 DS V4/GLM-5 config 详情
+
+---
+
+### 11:00 - GLM-5.3-Flash W8A8 模型信息
+
+从 ModelScope 获取：
+- `model_type: glm5_next`
+- `architectures: ['Glm5NextForConditionalGeneration']`
+- `quantization_config: {}`（空 — 量化信息在单独的 `quant_model_description.json` 中）
+- 模型描述文件显示：Dense 层用 FLOAT，MLP 层用 W8A8_DYNAMIC（INT8 权重 + INT8 激活）
+
+---
+
+### 10:00 - DeepSeek V4 Flash FP4 配置检查
+
+- `model_type: deepseek_v4`
+- 256 个路由专家，1 个共享专家，Top-k=6
+- `expert_dtype: fp4` — 原生 FP4 权重
+- 910B 不支持 FP4 → **不可行**
+
+---
+
+### 9:30 - 确认 910B2C 环境
+
+- 16×910B2C（65.5 GB HBM/卡 = 1024 GB 总）
+- 工作区：`/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test`
+- GitHub：`https://github.com/ada-yy1325/agent_benchmark_03.git`
+- 工作流：本地改 → git push → 远程 `inspire notebook exec` 执行
+- GLM-5.3-Flash（FP8）已在远程下载完成（306 GB, 62 shards）
+
+---
+
+## 下一步行动计划
+
+### 短期（带教确认后执行）
+
+1. **下载 DeepSeek-V4-Flash-w8a8-mtp（~300 GB）**
+   - 用 aria2c（8 连接/文件，8 文件并行 ≈ 64 并发连接）
+   - 源：ModelScope `Eco-Tech/DeepSeek-V4-Flash-w8a8-mtp`
+   - 脚本已准备：`_download_ds4_w8a8.py`
+
+2. **部署 vLLM 服务**
+   ```bash
+   vllm serve ./models/DeepSeek-V4-Flash-w8a8-mtp \
+     --host 0.0.0.0 --port 8001 \
+     --tensor-parallel-size 16 \
+     --enable-expert-parallel \
+     --quantization ascend \
+     --enforce-eager \
+     --max-model-len 8192 \
+     --trust-remote-code
+   ```
+
+3. **精度评测（MMLU 5-shot）**
+   ```bash
+   lm_eval --model vllm \
+     --model_args "pretrained=./models/DeepSeek-V4-Flash-w8a8-mtp,tensor_parallel_size=16,gpu_memory_utilization=0.9,trust_remote_code=True,enforce_eager=True,quantization=ascend" \
+     --tasks mmlu --batch_size auto \
+     --output_path ./outputs/ds4_w8a8_mmlu --num_fewshot 5
+   ```
+
+### 已知铁律（勿犯）
+1. ❌ **不碰 FP8** — 910B 不支持，GLM-5.3 的 FP8 版本是给 950DT 用的
+2. ❌ **不碰 GLM-5.3** — vLLM 不支持 glm5_next，CANN 版本不匹配（需 9.1.0）
+3. ❌ **不升级 CANN / 换镜像 / 编译源码** — 环境不支持就记录汇报
+4. ❌ **主线跑通前不做量化探索**
+5. 📝 **每一步报错原样保存日志**
+
+### 工作流
+1. 本地改代码 → `git add/commit/push` → GitHub
+2. 远程执行：`inspire notebook exec ... "cd /inspire/... && git fetch && git reset --hard origin/main && python3 <脚本>"`
+3. 查看日志 / NPU 指标 → 继续调试
+4. tmux 管理后台任务：`tmux new-session -d -s <会话名>`
 ## 2026-09-29 — DeepSeek V4 Flash 推理排障 & GLM-5.3-Flash 下载
 
 ### 一、DeepSeek V4 Flash 推理排障
