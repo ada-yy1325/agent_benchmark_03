@@ -140,6 +140,3 @@ if __name__ == "__main__":
 
     print_mem("final")
     print("\nDone.")
-        pass
-    cpu = psutil.virtual_memory()
-    print(f"  [{msg}] NPU mem: {npu_str} | CPU: {cpu.used/1e9:.0f}G/{cpu.total/1e9:.0f}G ({cpu.percent}%)")
