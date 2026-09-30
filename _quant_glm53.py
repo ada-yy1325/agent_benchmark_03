@@ -47,11 +47,11 @@ def run_quant():
     log(f"Device: npu")
 
     cmd = [
-        sys.executable, "-m", "msmodelslim", "quant",
+        "msmodelslim", "quant",
         "--model_path", MODEL_DIR,
         "--save_path", SAVE_DIR,
         "--config_path", YAML_PATH,
-        "--device", "npu",
+        "--device", "npu:0,1,2,3",
         "--trust_remote_code", "True",
     ]
     
