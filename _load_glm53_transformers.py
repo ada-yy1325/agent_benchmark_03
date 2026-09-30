@@ -43,7 +43,7 @@ def try_load_model():
 
     start = time.time()
     try:
-        from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig
+        from transformers import AutoModel, AutoTokenizer, AutoConfig
 
         print(f"\n[1/4] Loading tokenizer...")
         tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR, trust_remote_code=True)
@@ -57,7 +57,7 @@ def try_load_model():
         print(f"  Offload: {OFFLOAD_DIR}")
         sys.stdout.flush()
 
-        model = AutoModelForCausalLM.from_pretrained(
+        model = AutoModel.from_pretrained(
             MODEL_DIR,
             trust_remote_code=True,
             device_map="auto",
