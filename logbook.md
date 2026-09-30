@@ -1772,3 +1772,73 @@ source .venv/bin/activate && python test_api.py
 | 数据来源 | ModelScope Hub，自动流式加载，缓存到 `~/.cache/modelscope` |
 | 结果输出 | 可指定 `--output /tmp/...` 避免污染项目目录 |
 | 环境隔离 | `.venv` 虚拟环境，已配 `.gitignore` |
+---
+
+## 2026-09-30 — GLM-5.3-Flash 下载完成 & 量化/推理尝试
+
+### 一、下载状态
+
+| 项目 | 值 |
+|:----|:----|
+| 总 shards | **62** |
+| ✅ 完成 | **62/62** |
+| 总大小 | **305.8 GB** |
+| 磁盘剩余 | **2.4 TB** |
+
+- 4 个 stale `.incomplete` 残留文件已清理 ✅
+
+### 二、量化尝试（`_quant_glm53.py` + msmodelslim）
+
+**问题 1：`msmodelslim` 不支持 `python3 -m msmodelslim`**
+- 修复：改用 `msmodelslim` CLI 直接调用
+
+**问题 2：需要 `--model_type` 参数**
+- 修复：添加 `--model_type glm_5`
+
+**问题 3：`Glm5NextConfig` 没有 `num_hidden_layers`（在 `text_config` 子对象里）**
+- msmodelslim 的 `model_adapter.py:87` 直接访问 `self.config.num_hidden_layers`
+- GLM-5.3-Flash 是多模态模型，`num_hidden_layers: 45` 在 `text_config` 中
+- msmodelslim 26.1.0 不支持此架构
+- **结论：❌ msmodelslim 不支持 GLM-5.3-Flash**
+
+### 三、vLLM 推理尝试（`_infer_glm53_direct.py`）
+
+**问题：vLLM 无原生 glm5_next 实现**
+- vLLM 0.22.1 有 GLM4、GLM4-MoE 支持，但无 `glm5_next`
+- 识别为 `TransformersMultiModalMoEForCausalLM`，回退到 Transformers 实现 → 失败
+- **结论：❌ vLLM 0.22.1 不支持 GLM-5.3-Flash**
+
+### 四、模型信息汇总
+
+| 属性 | 值 |
+|:----|:----|
+| 模型类型 | `glm5_next` |
+| 架构 | `Glm5NextForConditionalGeneration` |
+| 量化 | FP4 (E4M3) 预量化 |
+| 激活参数量 | ~5.3B |
+| 总参数量 | ~190B (288 experts, 8 active/tok) |
+| 层数 | 45 |
+| 注意力 | MLA (kv_lora_rank=512) + Linear Attention |
+| Transformers 版本 | 已升级至 **5.17.0**（原 5.12.1） |
+| 需要的 transformers 版本 | 5.16.0+ (已满足) |
+
+### 五、当前限制
+
+| 问题 | 影响 |
+|:----|:----|
+| msmodelslim 不支持多模态嵌套 Config | ❌ 无法用 msmodelslim 量化 |
+| vLLM 无 `glm5_next` 原生实现 | ❌ 无法用 vLLM 推理 |
+| 模型 305.8 GB，4×64 GB 无法全量加载 | 即使有实现也可能 OOM |
+| 升级 vLLM-Ascend 到 0.23.0+ 可能支持 | 需确认版本兼容性 |
+
+### 六、软件变更记录
+
+- `transformers`: 5.12.1 → 5.17.0（为了支持 `glm5_next` 架构，pip 升级）
+- 此变更未保存镜像，重启后需重新升级
+
+### 七、新文件（git 已提交）
+
+- `_check_glm_cfg.py` — 检查 GLM config 字段
+- `_inspect_glm_cfg.py` — 列出 Glm5NextConfig 所有属性
+- `_inspect_glm_text_cfg.py` — 列出 text_config 所有属性
+- `_infer_glm53_direct.py` — 尝试 vLLM 直接推理（不成功）
