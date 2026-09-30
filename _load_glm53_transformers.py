@@ -28,6 +28,8 @@ def print_mem(msg="Memory"):
                 npu_str = parts[-1] if parts else "N/A"
                 break
     except Exception:
+        pass
+
 def try_load_model():
     """Try loading with OOM protection, return (model, tokenizer) or None."""
     print("=" * 60)
