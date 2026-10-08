@@ -1,72 +1,66 @@
 #!/usr/bin/env python3
-"""Download DeepSeek-V4-Flash-w8a8-mtp using aria2c for maximum speed."""
+"""Download DeepSeek-V4-Flash-w8a8-mtp using aria2c batch mode for max speed."""
 from modelscope.hub.api import HubApi
-import subprocess, os, sys, json, concurrent.futures, time
+import subprocess, os, time
 
 target = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-mtp"
 os.makedirs(target, exist_ok=True)
 
-# Get file listing
 api = HubApi()
 all_files = api.get_model_files("Eco-Tech/DeepSeek-V4-Flash-w8a8-mtp", recursive=True)
 print(f"Total files: {len(all_files)}")
 
-# Download all files in parallel using aria2c
-def download_file(f):
-    path = f.get("Path", f.get("Name", ""))
-    size = f.get("Size", 0)
+batch_file = "/tmp/aria2c_batch.txt"
+urls = []
+total_size = 0
+dirs_created = set()
+
+for f in all_files:
+    path = f.get("Path", "")
+    if not path or path.endswith("/"):
+        continue
     local_path = os.path.join(target, path)
-    os.makedirs(os.path.dirname(local_path), exist_ok=True)
-    
-    # Construct download URL
-    # ModelScope raw file URL pattern
+    d = os.path.dirname(local_path)
+    if d not in dirs_created:
+        os.makedirs(d, exist_ok=True)
+        dirs_created.add(d)
     url = f"https://modelscope.cn/api/v1/models/Eco-Tech/DeepSeek-V4-Flash-w8a8-mtp/repo?Revision=master&FilePath={path}"
-    
-    cmd = [
-        "aria2c", "-x", "8", "-s", "8", "-k", "1M",
-        "--max-tries=5", "--retry-wait=5",
-        "--continue=true", "--no-conf=true",
-        "-d", os.path.dirname(local_path),
-        "-o", os.path.basename(local_path) + ".tmp",
-        url
-    ]
-    
-    temp_path = local_path + ".tmp"
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
-        if result.returncode == 0:
-            os.rename(temp_path, local_path)
-            return (path, "OK", size)
-        else:
-            return (path, f"FAILED({result.returncode})", 0)
-    except Exception as e:
-        return (path, f"ERROR({e})", 0)
+    size = f.get("Size", 0)
+    total_size += size
+    urls.append((url, local_path, path[-50:], size))
 
-# First download small files (config, tokenizer, etc.)
-print("\nDownloading config files first...")
-small_files = [f for f in all_files if not f.get("Path","").endswith(".safetensors")]
-big_files = [f for f in all_files if f.get("Path","").endswith(".safetensors")]
+with open(batch_file, "w") as f:
+    for url, local_path, _, _ in urls:
+        f.write(f"{url}\n")
+        f.write(f"  out={os.path.basename(local_path)}\n")
+        f.write(f"  dir={os.path.dirname(local_path)}\n")
 
-with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
-    futures = [ex.submit(download_file, f) for f in small_files]
-    for i, fut in enumerate(concurrent.futures.as_completed(futures)):
-        path, status, _ = fut.result()
-        print(f"  [{i+1}/{len(small_files)}] {os.path.basename(path)}: {status}")
+print(f"Files: {len(urls)}, total: {total_size/1e9:.1f} GB")
 
-# Now download safetensor files in parallel
-print(f"\nDownloading {len(big_files)} model weight files...")
-start = time.time()
-completed_bytes = 0
-total_bytes = sum(f.get("Size", 0) for f in big_files)
+cmd = [
+    "aria2c",
+    "--max-concurrent-downloads=8",
+    "--max-connection-per-server=8",
+    "--split=8",
+    "--min-split-size=1M",
+    "--continue=true",
+    "--max-tries=5",
+    "--retry-wait=5",
+    "--console-log-level=notice",
+    "--summary-interval=10",
+    "--no-conf=true",
+    "-i", batch_file
+]
 
-with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
-    futures = {ex.submit(download_file, f): f for f in big_files}
-    for i, fut in enumerate(concurrent.futures.as_completed(futures)):
-        path, status, size = fut.result()
-        completed_bytes += size
-        elapsed = time.time() - start
-        speed = completed_bytes / elapsed / 1024 / 1024 if elapsed > 0 else 0
-        pct = completed_bytes / total_bytes * 100 if total_bytes > 0 else 0
-        print(f"  [{i+1}/{len(big_files)}] {os.path.basename(path)[:50]}: {status} ({pct:.1f}%, {speed:.1f} MB/s)")
-        
-print(f"\nDownload complete! Total: {completed_bytes/1e9:.1f} GB in {time.time()-start:.0f}s")
+print(f"Starting... {len(urls)} files, 8 parallel x 8 connections")
+print(f"{total_size/1e9:.1f} GB total")
+t0 = time.time()
+proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+for line in proc.stdout:
+    line = line.strip()
+    if line:
+        elapsed = time.time() - t0
+        print(f"[{elapsed/60:.1f}m] {line}")
+proc.wait()
+print(f"Done! {time.time()-t0:.0f}s, exit={proc.returncode}")
+os.remove(batch_file)
