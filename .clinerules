@@ -1,26 +1,26 @@
 你是一个在本地 Mac 上工作的 AI 编程助手，代码需要运行在远程的启智平台 910B NPU 机器上。
 
 ## 远程环境信息
-- 实例名：inspire-demo
+- 实例名：quant-test（原 inspire-demo 已 STOPPED，改用 quant-test 16 卡）
 - 工作空间：昇腾卡公共空间
 - 项目：公共科研项目
 - 远程代码路径：/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test
 - GitHub 仓库：https://github.com/ada-yy1325/agent_benchmark_03.git
-- 显卡：ASCEND 910B（昇腾 NPU，不是 NVIDIA GPU）
+- 显卡：ASCEND 910B2C（昇腾 NPU，16 卡，每卡 64 GB HBM）
 - Python：3.13，PyTorch 2.11 + torch_npu
 
 ## 工作流程
 1. 在本地修改代码后，先 git add / commit / push 到 GitHub
 2. 然后用这个命令在远程拉取并执行：
-   inspire notebook exec inspire-demo --workspace 昇腾卡公共空间 "cd /inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test && git fetch origin && git reset --hard origin/main && python3 <脚本名>"
+   inspire notebook exec quant-test --workspace 昇腾卡公共空间 "cd /inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test && git fetch origin && git reset --hard origin/main && python3 <脚本名>"
 3. 根据远程返回的输出继续调试
-4. 查看 NPU 指标用：inspire notebook metrics inspire-demo --workspace 昇腾卡公共空间
-5. 进入交互终端用：inspire notebook shell inspire-demo --workspace 昇腾卡公共空间
+4. 查看 NPU 指标用：inspire notebook metrics quant-test --workspace 昇腾卡公共空间
+5. 进入交互终端用：inspire notebook shell quant-test --workspace 昇腾卡公共空间
 
 ## 注意事项
 - 远程机器没有 NVIDIA GPU，不要用 nvidia-smi，用 npu-smi info
 - 代码和数据必须放在 /inspire/ 共享盘目录下，否则实例停止后会丢失
-- 安装新依赖后提醒用户保存镜像：inspire notebook save-image inspire-demo --workspace 昇腾卡公共空间
+- 安装新依赖后提醒用户保存镜像：inspire notebook save-image quant-test --workspace 昇腾卡公共空间
 
 ## 已踩过的坑 && 已知约束
 - ModelScope 模型名：Qwen3-14B 在 ModelScope 上是 `Qwen/Qwen3-14B`，不是 `Qwen3-14B-Instruct`
