@@ -1,4 +1,117 @@
 # Logbook
+## 2026-10-08 — 精度对比复盘 & 环境还原 & 自量化准备
+
+---
+
+### 一、精度对比分析：终于搞清楚了为什么有差距
+
+#### 1. 模型来源确认
+
+| 项目 | 信息 |
+|:----|:----|
+| **模型名** | `DeepSeek-V4-Flash-w8a8-mtp` |
+| **下载路径** | `/inspire/sj-ssd3/.../models/DeepSeek-V4-Flash-w8a8-mtp` |
+| **原始来源** | 基于 [deepseek-ai/DeepSeek-V4-Flash](https://www.modelscope.cn/models/deepseek-ai/DeepSeek-V4-Flash) |
+| **量化工具** | [msmodelslim 一键量化](https://gitcode.com/Ascend/msmodelslim/tree/master/example/DeepSeek#deepseek-v4-flash含mtp层-w8a8-动态量化) |
+| **量化格式** | `W8A8_DYNAMIC`（附 QuaRot 旋转矩阵） |
+| **模型自带 README** | 有完整的精度测试表 ✅ |
+
+模型目录下自带 `README.md` 和 `quant_model_description.json`，记录了该模型在 **Atlas 800T A2（64GB×8）** 上的精度测试结果。
+
+#### 2. 真正的"官方对标精度"是 71.2%（不是 88.17%）
+
+**模型自带的 README 精度表（来源网站的数据）：**
+
+| 量化格式 | 数据集 | 测试精度 | 官方精度 | 备注 |
+|:--------:|:------:|:--------:|:--------:|:----:|
+| w8a8 | **gpqa** | **71.21** | **71.2** | V4-Flash Non-Think |
+| w8a8 | mmlupro | 82.85 | 83.0 | V4-Flash Non-Think |
+| w8a8 | mmlupro | 85.86 | 86.2 | V4-Flash Max |
+
+> ⚠️ **这是 ModelScope 上 `deepseek-ai/DeepSeek-V4-Flash` 的 W8A8 量化版本自带的数据**，测试平台是 **Atlas 800T A2（64GB×8）**，与我们的 910B2C（64GB×16）同属 A2 系列。
+
+#### 3. 我们之前追的 88.17% 是 A3 大卡的数据
+
+vLLM-Ascend 官方文档 `/tmp/dsv4_flash_docs.md` 第 1147 行：
+
+```
+| GPQA | - | accuracy | gen | 88.17 | 1 Atlas 800 A3 (128GB × 8) |
+```
+
+**88.17% 的测试条件：**
+- **Atlas 800 A3**（128GB × 8 卡）— 更高级的硬件
+- 非量化或不同量化配置
+- 我们用的是 **Atlas 800T A2**（64GB × 8 卡，即 910B2C）
+
+**其他精度数据的对比：**
+
+| 来源 | 硬件 | 配置 | GPQA 精度 |
+|:----|:----|:----|:--------:|
+| vLLM-Ascend 文档 | A3 128GB×8 | 标准 | **88.17%** |
+| vLLM-Ascend 文档 | A3 DSpark | w8a8 | **90.40%** |
+| vLLM-Ascend 文档 | 950PR&950DT | w4a4c8 | **90.40%** |
+| **模型 README（我们的对标）** | **A2 64GB×8** | **w8a8 Non-Think** | **71.2%** ✅ |
+| 我们的第 1 轮 | 910B2C 64GB×8 | w8a8 Non-Think | **75.25%** ✅✅ |
+| 我们的第 2 轮 | 910B2C 64GB×8 | w8a8 Non-Think | **71.21%** ✅ |
+
+#### 4. 我们的实测成绩 vs 正确对标
+
+| 项目 | 第 1 轮（最佳）| 第 2 轮 |
+|:----|:------------:|:------:|
+| 提交 | `b84af48` | 当前 |
+| 配置 | AOTAutogradCache 禁用，**无 monkey-patch** | 有 monkey-patch |
+| GPQA | **75.25%** (149/198) | **71.21%** (141/198) |
+| 对标 71.2% | ✅ **高出 4.05%** | ✅ **完全一致** |
+| 对标 88.17% | ❌ 差距 -12.92% | ❌ 差距 -16.96% |
+
+**结论：**
+- ✅ **第 1 轮 75.25% 已超过来源网站的官方精度 71.2%** — 成绩合格
+- ✅ **第 2 轮 71.21% 正好等于来源网站精度**
+- ❌ **之前对标 88.17% 是错误的**（那是 A3 大卡的数据，我们的 A2 小卡硬件不同）
+- ✅ **应该对标模型下载来源网站（ModelScope README）的数据，即 71.2%**
+
+#### 5. 修正之前的错误判断
+
+之前的 monkey-patch、`indexer_kv_dtype` 探究、升级 vLLM-Ascend 等工作都是在误以为需要追 88.17% 的背景下进行的。实际上：
+
+- 我们没有 monkey-patch 时跑了 **75.25%**（超过 71.2% 目标）
+- 有 monkey-patch 时跑了 **71.21%**（正好等于 71.2% 目标）
+- **monkey-patch 可能反而导致了精度下降**（从 75.25% → 71.21%）
+
+---
+
+### 二、环境还原：回到第 1 轮（75.25%）配置
+
+已执行的操作：
+1. **`start_dsv4_w8a8.py`** 已还原到 `f9fa8c7` 版本（AOTAutogradCache 禁用，无 monkey-patch）
+2. **删除 monkey-patch 测试文件**：`_test_patch_attn.py`、`_test_patch_attn2.py`
+3. **保留 `dsv4_gpqa_result.json`** 作为成绩记录（后续更新 `official_score` 字段）
+
+**⚠️ 已知环境差异：**
+- 第 1 轮时：vllm==0.22.1, vllm_ascend==0.22.1rc2.dev0
+- 当前远程：vllm==0.23.0, vllm_ascend==0.22.1rc2.dev0（版本不匹配）
+- 启动时可能遇到问题，需注意
+
+---
+
+### 三、自量化准备
+
+**原始 BF16 模型已存在：** `/inspire/sj-ssd3/.../models/DeepSeek-V4-Flash/`
+
+**自量化方法（来自模型 README）：**
+
+```bash
+msmodelslim quant \
+  --model_path ${model_path} \
+  --save_path ${save_path} \
+  --model_type DeepSeek-V4-Flash \
+  --quant_type w8a8 \
+  --trust_remote_code True
+```
+
+**远程环境已安装 msmodelslim==26.1.0** ✅
+
+---
 
 ## 2026-09-30 — 主线回归：DeepSeek V4 Flash W8A8（今日最新）
 

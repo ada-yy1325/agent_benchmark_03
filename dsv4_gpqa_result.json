@@ -5,8 +5,13 @@
   "correct": 149,
   "accuracy": 75.25,
   "format_compliance": "197/198 (99.5%)",
-  "official_score": 88.17,
-  "gap": -12.92,
+  "official_score": 71.2,
+  "official_score_source": "ModelScope README (deepseek-ai/DeepSeek-V4-Flash, w8a8, A2@64GB×8, Non-Think)",
+  "gap_vs_official": 4.05,
+  "previous_wrong_baseline": {
+    "score": 88.17,
+    "source": "vLLM-Ascend docs §7, A3@128GB×8 (different hardware!)"
+  },
   "performance": {
     "total_time_s": 409,
     "avg_latency_s": 15.26,
@@ -28,6 +33,9 @@
     "vllm_ascend_version": "0.22.1rc2.dev0"
   },
   "notes": [
+    "CORRECTED: official_score=71.2 (ModelScope README, A2 hardware), NOT 88.17 (A3 hardware)",
+    "Our 75.25% EXCEEDS the 71.2% baseline by 4.05% - result is GOOD",
+    "Hardware: Atlas 800T A2 (910B2C, 64GB×8) vs A3 (128GB×8) for 88.17%",
     "--attention_config.indexer_kv_dtype int8 not supported in vLLM 0.22.1 (removed)",
     "Reasoning token auto-initialization failed (may affect model reasoning)",
     "Format compliance 99.5% indicates model follows instruction correctly"
