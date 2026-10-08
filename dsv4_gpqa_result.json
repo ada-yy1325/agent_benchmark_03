@@ -1,0 +1,35 @@
+{
+  "model": "DeepSeek-V4-Flash-w8a8-mtp",
+  "dataset": "gpqa_diamond",
+  "num_questions": 198,
+  "correct": 149,
+  "accuracy": 75.25,
+  "format_compliance": "197/198 (99.5%)",
+  "official_score": 88.17,
+  "gap": -12.92,
+  "performance": {
+    "total_time_s": 409,
+    "avg_latency_s": 15.26,
+    "avg_ttft_ms": 732,
+    "avg_tpot_ms": 31,
+    "avg_throughput_tok_s": 30.48,
+    "avg_input_tok": 250,
+    "avg_output_tok": 465
+  },
+  "mtp_stats": {
+    "acceptance_rate": 0.86,
+    "acceptance_length": 1.86
+  },
+  "deployment": {
+    "tensor_parallel_size": 8,
+    "data_parallel_size": 1,
+    "quantization": "ascend",
+    "vllm_version": "0.22.1",
+    "vllm_ascend_version": "0.22.1rc2.dev0"
+  },
+  "notes": [
+    "--attention_config.indexer_kv_dtype int8 not supported in vLLM 0.22.1 (removed)",
+    "Reasoning token auto-initialization failed (may affect model reasoning)",
+    "Format compliance 99.5% indicates model follows instruction correctly"
+  ]
+}
