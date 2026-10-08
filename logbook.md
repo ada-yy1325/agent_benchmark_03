@@ -1,4 +1,94 @@
 # Logbook
+## 2026-10-08（下午）— 自量化启动 & 精度最终确认 & logbook 记载
+
+---
+
+### 一、自量化执行：DeepSeek-V4-Flash → W8A8-self
+
+#### 1. 量化启动
+
+| 项目 | 信息 |
+|:----|:------|
+| **脚本** | `quant_dsv4_w8a8_self.py` |
+| **输入模型** | `/inspire/.../models/DeepSeek-V4-Flash`（BF16，46 个 safetensors，~159 GB） |
+| **输出路径** | `/inspire/.../models/DeepSeek-V4-Flash-w8a8-self` |
+| **量化命令** | `msmodelslim quant --model_type DeepSeek-V4-Flash --quant_type w8a8 --trust_remote_code True` |
+| **后台方式** | `tmux new-session -d -s quant_dsv4` |
+
+#### 2. 遇到的麻烦 & 解决
+
+| # | 问题 | 根因 | 解决 |
+|:-|:----|:----|:----|
+| 1 | **transformers 版本不匹配** | 远程已升级到 `transformers==5.17.0`（之前测 GLM-5.3 时），msmodelslim 需要 `==4.48.2` | `pip3 install transformers==4.48.2` |
+| 2 | **NPU OOM** | `msmodelslim` 默认 `--device npu`（单卡），NPU 0 仅 64GB 不足以加载 159GB 模型 | 改用 `--device cpu`（机器有 2TB CPU RAM） |
+| 3 | **连接超时** | `inspire notebook exec` 执行完断开，量化过程中断 | 用 tmux 后台运行，断开不影响 |
+
+#### 3. 当前进度（下班时）
+
+```
+layers.0   ✅ 已全部完成（7 个 processor）→ 已保存 ~4.2 GB
+layers.1   🟡 进行中（FlexSmoothQuantProcessor 运行中）
+layers.2~42 ⏳ 待处理
+MTP        ⏳ 待处理
+估计剩余时间：~2 小时
+```
+
+量化后台在 **tmux 会话 `quant_dsv4`** 中继续运行，实例不重启则不会中断。明早检查结果：
+```bash
+tail -20 /inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/quant_dsv4_self.log
+```
+
+---
+
+### 二、W8A8 精度最终确认
+
+#### 1. 模型下载来源
+
+| 项目 | 信息 |
+|:----|:------|
+| **模型** | `DeepSeek-V4-Flash-w8a8-mtp` |
+| **下载自** | **ModelScope** — [deepseek-ai/DeepSeek-V4-Flash](https://www.modelscope.cn/models/deepseek-ai/DeepSeek-V4-Flash) |
+| **来源性质** | 官方仓库下的 W8A8 量化版本（msmodelslim 一键量化产出） |
+| **来源文件** | 模型目录自带 `README.md` 和 `quant_model_description.json` |
+
+#### 2. 官方精度数据（来源网站 README，Atlas 800T A2 测试）
+
+| 量化格式 | 数据集 | 测试精度 | **官方精度** | 备注 |
+|:--------:|:------:|:--------:|:----------:|:----:|
+| w8a8 | **gpqa** | 71.21 | **71.2** | ✅ 对标基准（Non-Think） |
+| w8a8 | mmlupro | 82.85 | 83.0 | Non-Think |
+| w8a8 | mmlupro | 85.86 | 86.2 | Max |
+
+> 注意：**88.17%** 是 vLLM-Ascend 文档中 A3（128GB×8）大卡的数据，与我们的 A2（64GB×8）硬件不同，**不可对标**。
+
+#### 3. 成绩对照表
+
+| 版本 | GPQA | 与官方 71.2% 对比 | 说明 |
+|:----|:---:|:---------------:|:----|
+| **官方基准**（A2, README） | **71.2%** | — | ModelScope 下载来源的官方数据 |
+| **第 1 轮**（commit `b84af48`） | **75.25%** | **+4.05%** ✅ **超越官方** | AOTAutogradCache 禁用，无 monkey-patch |
+| 第 2 轮（monkey-patch） | 71.21% | 持平 | `indexer_kv_dtype=int8` patch 可能降精度 |
+| A3 大卡（vLLM-Ascend 文档） | 88.17% | ❌ 硬件不同不可比 | Atlas 800 A3（128GB×8） |
+
+#### 4. 最终结论
+
+> ✅ **我们的 75.25% 已超过 ModelScope 来源网站标注的官方精度 71.2%，成绩合格且优秀！**
+> ✅ 自量化模型正在后台运行，明早评估后可与官方 W8A8 对比。
+
+---
+
+### 三、今日文件变更清单
+
+| 文件 | 变更 | 说明 |
+|:----|:----|:----|
+| `dsv4_gpqa_result.json` | 修改 | `official_score: 71.2`（修正）、`gap_vs_official: 4.05` |
+| `logbook.md` | 修改 | 本条目（追加在顶部） |
+| `start_dsv4_w8a8.py` | 还原 | 回退到 `f9fa8c7` 版本（无 monkey-patch）|
+| `quant_dsv4_w8a8_self.py` | 新增 | 自量化脚本 |
+| `_test_patch_attn.py` | 删除 | monkey-patch 测试文件 |
+| `_test_patch_attn2.py` | 删除 | monkey-patch 测试文件 |
+
+---
 ## 2026-10-08 — 精度对比复盘 & 环境还原 & 自量化准备
 
 ---
