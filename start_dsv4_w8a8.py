@@ -13,7 +13,13 @@ import os
 import sys
 import asyncio
 
-# ── Step 1: Set environment variables (official A3 config) ──
+# ── Step 1: Disable AOTAutogradCache BEFORE any vLLM import ──────────
+import torch._functorch.config as _functorch_cfg
+_functorch_cfg.enable_autograd_cache = False
+_functorch_cfg.bypass_autograd_cache_key = True
+print("[launcher] ✓ AOTAutogradCache disabled", flush=True)
+
+# ── Step 2: Set environment variables (official A3 config) ──
 os.environ.setdefault("OMP_PROC_BIND", "false")
 os.environ.setdefault("OMP_NUM_THREADS", "10")
 os.environ.setdefault("PYTORCH_NPU_ALLOC_CONF", "expandable_segments:True")
