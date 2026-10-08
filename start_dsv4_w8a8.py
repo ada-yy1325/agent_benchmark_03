@@ -20,6 +20,7 @@ os.environ.setdefault("PYTORCH_NPU_ALLOC_CONF", "expandable_segments:True")
 os.environ.setdefault("HCCL_BUFFSIZE", "1024")
 os.environ.setdefault("TASK_QUEUE_ENABLE", "1")
 os.environ.setdefault("HCCL_OP_EXPANSION_MODE", "AIV")
+os.environ.setdefault("VLLM_ASCEND_ENABLE_FLASHCOMM1", "1")  # required by enable_dsa_cp
 
 # ── Step 2: Define MODEL_DIR ──
 MODEL_DIR = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-mtp"
