@@ -238,6 +238,42 @@ def _safe_fuse_norm(self, fused_map):
 _qp.QuaRotProcessor._fuse_norm = _safe_fuse_norm
 print('[RESUME] patched QuaRotProcessor._fuse_norm to skip absent submodules', flush=True)
 
+# Same class of bug: post_run walks ALL leftover layer entries (layers.1-42)
+# via _bake_mean and _rotate; those layers are absent in this partial model
+# (their transforms were already applied and saved in the original run).
+_orig_bake_mean = _qp.QuaRotProcessor._bake_mean
+_orig_rotate = _qp.QuaRotProcessor._rotate
+
+
+def _safe_bake_mean(self, bake_names):
+    kept = [n for n in bake_names if _submodule_exists(self.model, n)]
+    if kept:
+        return _orig_bake_mean(self, kept)
+
+
+def _safe_rotate(self, rotate_commands):
+    kept = []
+    for command in rotate_commands:
+        try:
+            self.model.get_submodule(command.target)
+            kept.append(command)
+            continue
+        except AttributeError:
+            pass
+        try:
+            path_list = command.target.split('.')
+            self.model.get_submodule('.'.join(path_list[:-1]))
+            kept.append(command)
+        except AttributeError:
+            pass  # absent in partial model; already applied in original run
+    if kept:
+        return _orig_rotate(self, kept)
+
+
+_qp.QuaRotProcessor._bake_mean = _safe_bake_mean
+_qp.QuaRotProcessor._rotate = _safe_rotate
+print('[RESUME] patched QuaRotProcessor._bake_mean/_rotate to skip absent submodules', flush=True)
+
 # Determinism sanity check: rotation must be reproducible with seed 1234
 from msmodelslim.processor.quarot.common.quarot_utils import create_rot, QuaRotMode
 r1 = create_rot(QuaRotMode.HADAMARD, 4096, block_size=32)
