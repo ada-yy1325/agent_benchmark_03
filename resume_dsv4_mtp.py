@@ -211,14 +211,26 @@ import msmodelslim.processor.quarot.offline_quarot.quarot as _qp
 _orig_fuse_norm = _qp.QuaRotProcessor._fuse_norm
 
 
-def _safe_fuse_norm(self, layernorm_keys):
-    existing = []
-    for k in layernorm_keys:
-        try:
-            self.model.get_submodule(k)
-            existing.append(k)
-        except AttributeError:
-            pass
+def _submodule_exists(model, name):
+    try:
+        model.get_submodule(name)
+        return True
+    except AttributeError:
+        return False
+
+
+def _safe_fuse_norm(self, fused_map):
+    # fused_map: {key: value}, key/value may be str or tuple/list of names.
+    # This resume model only contains layer 0 + mtp.0; skip entries whose
+    # modules are absent (other layers were fused in the original run).
+    if not isinstance(fused_map, dict) or not fused_map:
+        return
+    existing = {}
+    for key, value in fused_map.items():
+        keys = list(key) if isinstance(key, (list, tuple)) else [key]
+        vals = list(value) if isinstance(value, (list, tuple)) else [value]
+        if all(_submodule_exists(self.model, k) for k in keys + vals):
+            existing[key] = value
     if existing:
         return _orig_fuse_norm(self, existing)
 
