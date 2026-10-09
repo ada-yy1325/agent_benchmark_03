@@ -57,15 +57,16 @@ def patched_mtp_preprocess(self, model, mtp_decoder, args, kwargs):
 DeepSeekV4ModelAdapter.mtp_preprocess = patched_mtp_preprocess
 print('[NPU16] patched mtp_preprocess with dtype alignment', flush=True)
 
-import msmodelslim.cli.__main__ as cli_entry
+if __name__ == '__main__':
+    import msmodelslim.cli.__main__ as cli_entry
 
-sys.argv = [
-    'msmodelslim', 'quant',
-    '--model_path', '/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash',
-    '--save_path', '/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-npu16',
-    '--model_type', 'DeepSeek-V4-Flash',
-    '--quant_type', 'w8a8',
-    '--trust_remote_code', 'True',
-    '--device', 'npu:0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15',
-]
-cli_entry.main()
+    sys.argv = [
+        'msmodelslim', 'quant',
+        '--model_path', '/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash',
+        '--save_path', '/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-npu16',
+        '--model_type', 'DeepSeek-V4-Flash',
+        '--quant_type', 'w8a8',
+        '--trust_remote_code', 'True',
+        '--device', 'npu:0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15',
+    ]
+    cli_entry.main()
