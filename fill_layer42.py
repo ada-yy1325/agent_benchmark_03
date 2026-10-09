@@ -50,7 +50,7 @@ def main():
     # loader does (layer_prefix="layers.42", scales fetched by name internally)
     deq = {}
     for name in missing:
-        if name.endswith(".weight") and not name.endswith(".attn_norm.weight"):
+        if name.endswith(".weight") and not (name.endswith(".attn_norm.weight") or name.endswith(".ffn_norm.weight")):
             wfile = orig_idx[name]
             with safe_open(os.path.join(ORIG, wfile), framework="pt") as s:
                 deq[name] = s.get_tensor(name)
@@ -59,7 +59,7 @@ def main():
 
     new_tensors = {}
     for name in missing:
-        if name.endswith(".attn_norm.weight"):
+        if name.endswith(".attn_norm.weight") or name.endswith(".ffn_norm.weight"):
             # post-fuse norm is float32 ones (verified on all other layers)
             wfile = orig_idx[name]
             with safe_open(os.path.join(ORIG, wfile), framework="pt") as s:
