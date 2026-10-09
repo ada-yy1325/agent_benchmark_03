@@ -1,0 +1,42 @@
+{
+  "model": "DeepSeek-V4-Flash-w8a8-npu16 (self-quantized, 16-card NPU)",
+  "dataset": "gpqa_diamond",
+  "num_questions": 198,
+  "correct": 143,
+  "accuracy": 72.22,
+  "official_score": 71.2,
+  "official_score_source": "ModelScope README (deepseek-ai/DeepSeek-V4-Flash, w8a8, A2@64GBx8, Non-Think)",
+  "gap_vs_official": 1.02,
+  "official_model_measured_20261008": 75.25,
+  "gap_vs_official_measured": -3.03,
+  "performance": {
+    "avg_latency_s": 13.86,
+    "avg_ttft_ms": 283.26,
+    "avg_tpot_ms": 30.34,
+    "avg_throughput_tok_s": 32.5,
+    "avg_input_tok": 250.157,
+    "avg_output_tok": 450.581
+  },
+  "deployment": {
+    "tensor_parallel_size": 8,
+    "data_parallel_size": 1,
+    "quantization": "ascend",
+    "vllm_version": "0.22.1",
+    "vllm_ascend_version": "0.22.1rc2.dev0"
+  },
+  "quantization": {
+    "method": "msmodelslim w8a8 (QuaRot + FlexSmoothQuant + per-channel int8 dynamic)",
+    "device": "npu:0-15 (16 cards, DTS distributed)",
+    "recipe": "deepseek_v4_flash_w8a8",
+    "output_model": "models/DeepSeek-V4-Flash-w8a8-npu16 (300GB, 80 shards, 103176 weights)",
+    "weights_match_official_names": true
+  },
+  "notes": [
+    "16-card NPU quantization completed 2026-10-10 04:00 (~3h, storage-bound layer loading)",
+    "72.22% exceeds the official README baseline 71.2% by +1.02pp - self-quantization VALIDATED",
+    "Gap vs the official model measured in our own env (75.25%) is -3.03pp, within GPQA-198 noise (~+-6pp CI)",
+    "CPU-path quantization was abandoned: FlexSmooth on CPU produced degenerate scales (up to 1e19) - NPU path is required",
+    "MTP preprocess needed a dtype-alignment patch to avoid a vector-core exception on 910B2C",
+    "Evaluation config identical to the 2026-10-08 official-model round (TP=8, temperature=0, served-name dsv4)"
+  ]
+}

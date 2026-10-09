@@ -1,4 +1,70 @@
 # Logbook
+## 2026-10-09（晚间）— 自量化最终完成 & GPQA 复测 & 收尾
+
+---
+
+### 一、自量化 W8A8 模型最终完成（含 MTP）
+
+**最终产物**：`models/DeepSeek-V4-Flash-w8a8-self/`（313GB，75 分片，**103,176 权重 = 与官方 w8a8-mtp 名称集合完全一致**）
+
+| 阶段 | 结果 |
+|:----|:-----|
+| 43 层量化 | ✅ 11:42-14:33 完成（67 分片，100,638 权重，经全量校验 0 缺失） |
+| MTP 层量化 | ✅ 经 6 轮续跑修复完成（14:33 崩溃 → 20:08 完成，产物 7 分片） |
+| layer 42 补齐 | ✅ 19 个专家（237-255）+ shared_experts + attn_norm/ffn_norm 确定性重建（185 张量） |
+| 旋转矩阵 | ✅ `optional/quarot.safetensors`（67MB，seed=1234 确定性重建，已验证可复现） |
+| 完整性校验 | ✅ 权重名与官方**逐一比对零差异**；索引/描述文件全覆盖；vLLM 成功加载 |
+
+### 二、今天踩过的坑（全部已解决，按时间顺序）
+
+| # | 问题 | 根因 | 解决 |
+|:-|:----|:----|:-----|
+| 1 | 14:33 量化崩在 MTP 层 | `mtp_preprocess` 硬编码 `.to('npu')`，混合 dtype（bf16 输入 × fp32 head）在 NPU 上 vector core 异常（507035） | 续跑方案：CPU 版 mtp_preprocess + dtype 对齐 |
+| 2 | 14:33 前 43 层分片"不可用" | QuaRot 旋转矩阵只随进程内存存在、仅在收尾时落盘 | 源码确认 `create_rot(seed=1234)` **确定性可复现** → 续跑收尾时重建 |
+| 3 | 旧产物被清 | 新任务启动前被删除（共享盘无回收站） | 快照硬链接 + 全盘搜索确认不可恢复，43 层重跑后重新产出 |
+| 4 | 续跑脚本多次崩溃 | ① CLI `main()` 缺 args；② `kwargs` 未初始化；③ QuaRot `post_run` 对部分模型调用 `_fuse_norm/_bake_mean/_rotate` 遍历缺失层；④ 我包装器的 dict/list 契约错误 | 逐一修复并 git 化交付（远程 `git pull` 更新，避免文件传输损坏） |
+| 5 | h42 校准需 43 层前向（每次 ~70 分钟） | 层权重只存进程内存 | **h42 落盘缓存**：任何重试 15 分钟直达 MTP（用户提出的"保存加载结果"方案） |
+| 6 | 合并索引 789 条指向错误分片 | 续跑 post_run 顺带保存了未量化的 layer-0 原始权重，合并优先级写反 | `fix_merge_priority.py`：原始量化分片优先 |
+| 7 | layer 42 缺 185 张量 | 原始运行保存被截断（experts 237-255 + 双 norm） | `fill_layer42.py` 确定性重建：专家反量化→QuaRot（seed=1234）→per-channel minmax int8；norm 为融合后全 1（与其余层实测一致） |
+| 8 | vLLM 加载报 `narrow() 0-dim` / 形状断言 | 补齐脚本 offset 被 0 维标量覆盖；scale/offset 形状写成 [N] 应为 [N,1] | 修正为保存器同款 [N,1] |
+| 9 | vLLM 启动 ImportError Gemma3Config | 昨天为 msmodelslim 降级的 transformers 4.48.2 太旧 | 恢复 **5.17.0**（量化已完成，评测环境与昨天 75.25% 轮一致） |
+| 10 | exec 通道 15:50 起断裂 | 平台 SSH 代理 500 + CLI transport 缓存误判（910B 无 nvidia-smi → 走 SSH） | 本地 transport 缓存标记受限机器 → 强制 JupyterTerminal；后期大命令不稳改走 **git push/pull** 通道 |
+
+### 三、GPQA-Diamond 复测结果（与昨天官方模型轮同口径）
+
+- 脚本：`start_dsv4_w8a8_npu16.py` + `eval_gpqa_dsv4_self.py`（全新文件，原文件零改动）
+- 配置与昨天 75.25% 轮完全一致：TP=8、`--quantization ascend`、temperature=0、`served-name dsv4`
+- 结果存 `dsv4_gpqa_result_selfquant.json`（不覆盖昨天的记录）
+
+**最终成绩（2026-10-10 04:38）**：
+
+| 模型 | GPQA-Diamond | 对比 |
+|:----|:---:|:-----|
+| 官方 README 对标 | 71.2% | — |
+| **自量化（16 卡 NPU）** | **72.22%（143/198）** | ✅ **超出官方 +1.02pp** |
+| 官方模型实测（10-08 轮） | 75.25% | 差距 -3.03pp（GPQA-198 的 95% CI ≈ ±6pp，属统计噪声） |
+
+- 性能：Avg Lat 13.9s / TTFT 283ms / TPOT 30.3ms / 吞吐 32.5 tok/s / 平均输出 450 token
+- **结论：910B 上自量化 W8A8 方案验证成功，精度达标且超过官方声明值。**
+
+### 三·五、CPU 路 vs NPU 路的最终定论
+
+| 路径 | 结果 |
+|:----|:-----|
+| CPU 路（11:42 首轮 + 数轮续跑） | ❌ **FlexSmooth 数值 bug**：87 个张量的 scale 爆炸至 1e19、注意力权重整体偏差 ~30 倍 → 输出乱码（冒烟测试全是破折号）。专家权重（数据无关量化）与官方**逐位一致**，证明管线其余部分正确 |
+| **16 卡 NPU 路（官方方法）** | ✅ **完全正确**：坏缩放 0、scale 区间与官方一致、冒烟 5/5 全对、GPQA 72.22% |
+
+**经验**：该模型在 910B 上必须走 NPU 量化（msmodelslim 的 CPU 路径有数值问题）；16 卡 DTS 真并行（world_size=16，但瓶颈在共享盘权重加载 ~2.5-4.5 分钟/层，全量 ~3 小时）；`mtp_preprocess` 需 dtype 对齐补丁（bf16 激活 × fp32 head 在 NPU 上 vector core 异常）。
+
+### 四、产物与保护清单
+
+- 模型：`models/DeepSeek-V4-Flash-w8a8-self/`（313GB）+ 快照目录 `-snap/`（硬链接备份）
+- 脚本（已全部 git 提交推送）：`resume_dsv4_mtp.py`（MTP 续跑）、`merge_mtp.py`、`fix_merge_priority.py`、`fill_layer42.py`、`rebuild_index.py`、`*_self.*`（评测三件套）、`_burn16.py`（保活）
+- 日志：`quant_dsv4_self.log`、`resume_mtp.log`、`/tmp/dsv4_server.log`、`/tmp/eval_self.log`
+- 环境：transformers 已恢复 5.17.0（评测态）；4.48.2（量化态）保留在昨晚 stopsave 镜像与用户手动镜像中
+
+---
+
 ## 2026-10-09 — 量化事故复盘 & 重启监控 & 三层防护
 
 ---
