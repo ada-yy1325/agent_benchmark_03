@@ -41,21 +41,29 @@ def main():
     log(f"missing names: {len(missing)}")
     log(f"prefix distribution: {dict(Counter(k.split('.')[0] for k in missing))}")
 
-    orig_idx = json.load(open(os.path.join(ORIG, "model.safetensors.index.json")))
+    orig_idx = json.load(open(os.path.join(ORIG, "model.safetensors.index.json")))["weight_map"]
 
     # deterministic rotation (same as the original run: seed 1234, HADAMARD, block 32, dim 4096)
     rot = create_rot(QuaRotMode.HADAMARD, 4096, block_size=32)
+
+    # dequant the missing fp8-stored weights in one batch, exactly like the adapter
+    # loader does (layer_prefix="layers.42", scales fetched by name internally)
+    deq = {}
+    for name in missing:
+        if name.endswith(".weight") and not name.endswith(".attn_norm.weight"):
+            wfile = orig_idx[name]
+            with safe_open(os.path.join(ORIG, wfile), framework="pt") as s:
+                deq[name] = s.get_tensor(name)
+    auto_dequant_state_dict("layers.42", deq, ORIG)
+    log(f"dequantized {len(deq)} weight tensors")
 
     new_tensors = {}
     for name in missing:
         if name.endswith(".attn_norm.weight"):
             # post-fuse norm is float32 ones (verified on all other layers)
-            ref = "layers.41.attn_norm.weight"
-            shape = None
-            # get shape from original model
-            f0 = orig_idx[ref]
-            with safe_open(os.path.join(ORIG, f0), framework="pt") as s:
-                shape = s.get_slice(ref).get_shape()
+            wfile = orig_idx[name]
+            with safe_open(os.path.join(ORIG, wfile), framework="pt") as s:
+                shape = s.get_slice(name).get_shape()
             new_tensors[name] = torch.ones(shape, dtype=torch.float32)
             log(f"filled {name}: ones({list(shape)}) float32")
             continue
@@ -70,18 +78,7 @@ def main():
 
         if name.endswith(".weight"):
             base = name[: -len(".weight")]
-            # dequant the original fp8-stored expert weight
-            state_dict = {}
-            wfile = orig_idx[name]
-            sfile = orig_idx.get(base + ".scale")  # original fp8 scale tensor name
-            with safe_open(os.path.join(ORIG, wfile), framework="pt") as s:
-                state_dict[name] = s.get_tensor(name)
-            if sfile:
-                with safe_open(os.path.join(ORIG, sfile), framework="pt") as s:
-                    state_dict[base + ".scale"] = s.get_tensor(base + ".scale")
-            prefix = base.rsplit(".", 1)[0] + "."
-            auto_dequant_state_dict(prefix, state_dict, ORIG)
-            w = state_dict[name].float()
+            w = deq[name].float()
 
             # QuaRot rotation: w1/w3 right, w2 left (same as get_rotate_map)
             if name.endswith(".w2.weight"):
