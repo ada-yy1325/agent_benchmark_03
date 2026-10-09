@@ -25,10 +25,20 @@ def main():
     # that currently point at files which came from RES.
     main_shards = sorted(glob.glob(os.path.join(MAIN, "quant_model_weights-*.safetensors")))
     # Files from RES are the LAST ones (offset numbering); main ones are the first 67.
-    # Rebuild the location map by scanning every shard.
+    # Rebuild the location map: original main shards (1..67, quantized) take priority.
+    def shard_index(sh):
+        return int(os.path.basename(sh).split("-")[1])
+
+    main_shards = sorted(glob.glob(os.path.join(MAIN, "quant_model_weights-*.safetensors")))
+    res_shards = [sh for sh in main_shards if shard_index(sh) > 67]
+    orig_shards = [sh for sh in main_shards if shard_index(sh) <= 67]
     name_to_file = {}
-    print(f"scanning {len(main_shards)} shards...", flush=True)
-    for sh in main_shards:
+    print(f"scanning {len(main_shards)} shards ({len(orig_shards)} original + {len(res_shards)} resume)...", flush=True)
+    for sh in res_shards:
+        with safe_open(sh, framework="pt") as f:
+            for k in f.keys():
+                name_to_file.setdefault(k, os.path.basename(sh))
+    for sh in orig_shards:
         with safe_open(sh, framework="pt") as f:
             for k in f.keys():
                 name_to_file[k] = os.path.basename(sh)
