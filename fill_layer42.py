@@ -75,8 +75,10 @@ def main():
             # derived in the loop below; skip here
             continue
         if name.endswith(".weight_offset"):
-            # symmetric minmax -> zero offsets
-            new_tensors[name] = torch.zeros((), dtype=torch.float32)
+            # normally set by the weight branch above (sorted order puts
+            # ".weight" first); only fall back if somehow absent
+            if name not in new_tensors:
+                new_tensors[name] = torch.zeros((), dtype=torch.float32)
             continue
 
         if name.endswith(".weight"):
