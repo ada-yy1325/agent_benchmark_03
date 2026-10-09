@@ -35,7 +35,7 @@ def log(msg):
 
 
 def quant_type_rule(name):
-    """Recipe-driven quant type for a tensor name (deepseek_v4_flash_w8a8)."""
+    """Fallback recipe-driven quant type for a tensor name (deepseek_v4_flash_w8a8)."""
     base = name
     for suf in (".weight_scale", ".weight_offset", ".weight"):
         if base.endswith(suf):
@@ -56,24 +56,16 @@ def quant_type_rule(name):
     return "FLOAT"
 
 
-def main():
-    # ---------- 0. validate the rule against the official model ----------
+def build_official_type_map():
+    """Exact per-weight quant type from the official w8a8-mtp model (same recipe)."""
     off_desc = json.load(open(os.path.join(OFFICIAL, "quant_model_description.json")))
-    off_idx = json.load(open(os.path.join(OFFICIAL, "quant_model_weights.safetensors.index.json")))
-    bad = []
-    for k, v in off_idx["weight_map"].items():
-        r = quant_type_rule(k)
-        if off_desc.get(k) != r:
-            bad.append((k, off_desc.get(k), r))
-    if bad:
-        log(f"WARNING: rule mismatch vs official on {len(bad)} keys (first 10):")
-        for k, o, r in bad[:10]:
-            log(f"   {k}: official={o} rule={r}")
-        if not DRY_RUN and len(bad) > 50:
-            log("Too many mismatches - aborting.")
-            sys.exit(1)
-    else:
-        log(f"quant-type rule matches official model on all {len(off_idx['weight_map'])} weights - OK")
+    return off_desc
+
+
+def main():
+    # ---------- 0. prepare official type map ----------
+    off_desc = build_official_type_map()
+    log(f"official description entries: {len(off_desc)}")
 
     # ---------- 1. build weight_map from MAIN shards ----------
     main_shards = sorted(glob.glob(os.path.join(MAIN, "quant_model_weights-*.safetensors")))
@@ -139,13 +131,23 @@ def main():
     log("merged index json written")
 
     # ---------- 5. merged description json ----------
+    # Prefer exact official types (same recipe/architecture), then RES entries,
+    # then the fallback rule.
     desc_out = OrderedDict()
+    n_off = n_res = n_rule = 0
     for k in wm_merged:
-        # prefer exact entries from RES desc for MTP tensors; rule for the rest
-        if k in res_desc and isinstance(res_desc[k], str):
+        if k in off_desc and isinstance(off_desc[k], str):
+            desc_out[k] = off_desc[k]
+            n_off += 1
+        elif k in res_desc and isinstance(res_desc[k], str):
             desc_out[k] = res_desc[k]
+            n_res += 1
         else:
             desc_out[k] = quant_type_rule(k)
+            n_rule += 1
+    log(f"description types: official-map={n_off}, res-map={n_res}, fallback-rule={n_rule}")
+    if n_rule > 0:
+        log(f"WARNING: {n_rule} entries fell back to the name rule")
     for k in ("version", "model_quant_type", "metadata", "group_size", "optional"):
         if k in res_desc:
             desc_out[k] = res_desc[k]
@@ -162,6 +164,12 @@ def main():
         log("optional/ copied")
     else:
         log("WARNING: no optional/ dir in RES")
+    # Some versions write quarot.safetensors at the RES root; put it in optional/.
+    root_quarot = os.path.join(RES, "quarot.safetensors")
+    if os.path.isfile(root_quarot):
+        os.makedirs(os.path.join(MAIN, "optional"), exist_ok=True)
+        shutil.copy2(root_quarot, os.path.join(MAIN, "optional", "quarot.safetensors"))
+        log("root quarot.safetensors copied to optional/")
     for fn in os.listdir(RES):
         fp = os.path.join(RES, fn)
         if os.path.isfile(fp) and "quant_model_weights" not in fn:
