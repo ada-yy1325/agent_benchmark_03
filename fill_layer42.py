@@ -48,13 +48,16 @@ def main():
 
     # dequant the missing fp8-stored weights in one batch, exactly like the adapter
     # loader does (layer_prefix="layers.42", scales fetched by name internally)
+    # dequant the missing fp8-stored weights in one batch, exactly like the adapter
+    # loader does: state_dict keys WITHOUT the layer prefix; get_real_name prepends it.
     deq = {}
     for name in missing:
         if name.endswith(".weight") and not (name.endswith(".attn_norm.weight") or name.endswith(".ffn_norm.weight")):
             wfile = orig_idx[name]
             with safe_open(os.path.join(ORIG, wfile), framework="pt") as s:
-                deq[name] = s.get_tensor(name)
+                deq[name[len("layers.42."):]] = s.get_tensor(name)
     auto_dequant_state_dict("layers.42", deq, ORIG)
+    deq = {f"layers.42.{k}": v for k, v in deq.items()}
     log(f"dequantized {len(deq)} weight tensors")
 
     new_tensors = {}
