@@ -204,6 +204,28 @@ def patched_generate_model_forward(self, model, inputs):
 
 DeepSeekV4ModelAdapter.generate_model_forward = patched_generate_model_forward
 
+# QuaRot post_run walks the FULL fuse map (43 layers + mtp) via get_submodule,
+# but this resume model only contains layer 0 + mtp.0 (other layers' norms were
+# already fused during the original run). Skip fuse targets that are absent.
+import msmodelslim.processor.quarot.offline_quarot.quarot as _qp
+_orig_fuse_norm = _qp.QuaRotProcessor._fuse_norm
+
+
+def _safe_fuse_norm(self, layernorm_keys):
+    existing = []
+    for k in layernorm_keys:
+        try:
+            self.model.get_submodule(k)
+            existing.append(k)
+        except AttributeError:
+            pass
+    if existing:
+        return _orig_fuse_norm(self, existing)
+
+
+_qp.QuaRotProcessor._fuse_norm = _safe_fuse_norm
+print('[RESUME] patched QuaRotProcessor._fuse_norm to skip absent submodules', flush=True)
+
 # Determinism sanity check: rotation must be reproducible with seed 1234
 from msmodelslim.processor.quarot.common.quarot_utils import create_rot, QuaRotMode
 r1 = create_rot(QuaRotMode.HADAMARD, 4096, block_size=32)
