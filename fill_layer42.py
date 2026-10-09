@@ -93,11 +93,12 @@ def main():
                 rotate_weight(w, rot, True)
 
             # W8A8_DYNAMIC per-channel int8 symmetric minmax
+            # shapes must match AscendV1Saver convention: scale/offset [out, 1]
             scale = w.abs().max(dim=-1, keepdim=True).values / 127.0
             q = torch.round(w / scale).clamp(-128, 127).to(torch.int8)
             new_tensors[name] = q
-            new_tensors[base + ".weight_scale"] = scale.squeeze(-1).to(torch.float32)
-            new_tensors[base + ".weight_offset"] = torch.zeros_like(scale.squeeze(-1), dtype=torch.float32)
+            new_tensors[base + ".weight_scale"] = scale.to(torch.float32)
+            new_tensors[base + ".weight_offset"] = torch.zeros_like(scale, dtype=torch.float32)
             log(f"quantized {name}: shape={list(q.shape)}")
             continue
 
