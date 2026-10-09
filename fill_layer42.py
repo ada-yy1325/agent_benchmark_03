@@ -83,11 +83,11 @@ def main():
             base = name[: -len(".weight")]
             w = deq[name].float()
 
-            # QuaRot rotation: w1/w3 right, w2 left (same as get_rotate_map)
+            # QuaRot rotation: w1/w3 right, w2 left (same as get_rotate_map); in-place
             if name.endswith(".w2.weight"):
-                w = rotate_weight(w, rot, RotSide.LEFT)
+                rotate_weight(w, rot, RotSide.LEFT)
             else:
-                w = rotate_weight(w, rot, RotSide.RIGHT)
+                rotate_weight(w, rot, RotSide.RIGHT)
 
             # W8A8_DYNAMIC per-channel int8 symmetric minmax
             scale = w.abs().max(dim=-1, keepdim=True).values / 127.0
