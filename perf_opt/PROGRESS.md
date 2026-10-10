@@ -2,8 +2,8 @@
 恢复规则：先读本文件，产物存在且校验通过的步骤跳过，从第一个 [ ] 继续。
 
 ## 阶段 0 · 基线
-- [ ] 0.1 环境核实建档        产物：env/env_info.json, env/paths_check.json
-- [ ] 0.2 建目录+本进度文件     产物：perf_opt/ 目录结构, PROGRESS.md
+- [x] 0.1 环境核实建档        产物：env/env_info.json, env/paths_check.json
+- [x] 0.2 建目录+本进度文件     产物：perf_opt/ 目录结构, PROGRESS.md
 - [ ] 0.3 压测脚本+冒烟        产物：scripts/bench_serving.py, results/smoke/
 - [ ] 0.4 固化基线启动脚本     产物：scripts/start_server_baseline.py（git tag baseline）
 - [ ] 0.5 启动基线服务+冒烟    产物：server_logs/baseline.log
