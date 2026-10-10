@@ -180,6 +180,17 @@ async def main():
         safe_min += 1
     print(f"[bench] random id range: [{safe_min}, {safe_max})", flush=True)
 
+    def make_prompt():
+        return [random.randint(safe_min, safe_max) for _ in range(args.input_len)]
+
+    queue = asyncio.Queue()
+    for i in range(args.num_requests):
+        queue.put_nowait((i, make_prompt()))
+
+    sampler = NpuSampler(args.npu_stats)
+    sampler.start()
+    print(f"[bench] NPU sampler started -> {args.npu_stats}", flush=True)
+
     records = []
     lock = asyncio.Lock()
     completed = 0
