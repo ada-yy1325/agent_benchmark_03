@@ -58,7 +58,7 @@ class NpuSampler(threading.Thread):
                     ["npu-smi", "info"],
                     capture_output=True, text=True, timeout=10
                 ).stdout
-                used = [int(x) for x in re.findall(r"(\d+)\s*/\s*\d+\s*MB", out)]
+                used = [int(x) for x, y in re.findall(r"(\d+)\s+/\s+(\d+)", out) if int(y) > 10000]
             except Exception:
                 used = []
                 out = ""

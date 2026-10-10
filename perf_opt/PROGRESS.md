@@ -4,9 +4,12 @@
 ## 阶段 0 · 基线
 - [x] 0.1 环境核实建档        产物：env/env_info.json, env/paths_check.json
 - [x] 0.2 建目录+本进度文件     产物：perf_opt/ 目录结构, PROGRESS.md
-- [ ] 0.3 压测脚本+冒烟        产物：scripts/bench_serving.py, results/smoke/
-- [ ] 0.4 固化基线启动脚本     产物：scripts/start_server_baseline.py（git tag baseline）
-- [ ] 0.5 启动基线服务+冒烟    产物：server_logs/baseline.log
+- [x] 0.3 压测脚本+冒烟 ✅     产物：scripts/bench_serving.py (含 NPU 采样 regex 修复), results/smoke/{smoke_c1,c2,c4}.json
+  - smoke_c1: 2/2 ✅ TTFT=234.83ms TPOT=176.3ms fallback=False
+  - smoke_c2: 4/4 ✅ TTFT=256.37ms TPOT=120.09ms
+  - smoke_c4: 8/8 ✅ TTFT=283.99ms TPOT=367.94ms
+- [ ] 0.4 固化基线启动脚本     产物：scripts/start_server_baseline.py（git tag smoke-pass）
+- [ ] 0.5 启动基线服务+冒烟    产物：server_logs/baseline.log（已在 tmux dsv4_baseline 运行中）
 - [ ] 0.6 基线压测 c=1 ×3      产物：results/baseline/baseline_c1_run{1,2,3}.json
 - [ ] 0.7 基线汇总             产物：summary/baseline_summary.json
 
@@ -18,3 +21,8 @@
 - [ ] 1.5 矩阵汇总             产物：summary/matrix_summary.{json,csv}
 - [ ] 1.6 分析+findings        产物：summary/findings.md（甜蜜点/劣化点/瓶颈）
 - [ ] 1.7 git 提交+收尾        产物：git commit，更新 PROGRESS
+
+## 已知问题
+- 🔴 远程 GitHub 不可达 → 使用 base64+gzip 分片同步文件到远程
+- 🟡 CANN 25.0.rc1.1 (vs 预期 9.0.0) — 待确认影响
+- ✅ NPU 显存采样 regex 已修复（npu-smi 的 HBM 行无 "MB" 后缀）
