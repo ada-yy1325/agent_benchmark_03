@@ -112,17 +112,20 @@ async def one_request(client, args, tokenizer, prompt_ids, idx):
                                 break
                             try:
                                 obj = json.loads(data)
-                                txt = obj["choices"][0].get("text", "")
+                                # capture usage first (before accessing choices, may be empty)
+                                if "usage" in obj and obj["usage"]:
+                                    raw_usage = obj["usage"]
+                                choices = obj.get("choices", [])
+                                if not choices:
+                                    continue
+                                txt = choices[0].get("text", "")
                                 now = time.time()
                                 if txt and first_chunk is None:
                                     first_chunk = now
                                 if txt:
                                     parts.append(txt)
                                     last_chunk = now
-                                # capture usage for accurate token counts
-                                if "usage" in obj and obj["usage"]:
-                                    raw_usage = obj["usage"]
-                            except (json.JSONDecodeError, KeyError, IndexError):
+                            except (json.JSONDecodeError, KeyError):
                                 pass
             else:
                 async for line in resp.aiter_lines():
@@ -133,17 +136,20 @@ async def one_request(client, args, tokenizer, prompt_ids, idx):
                         break
                     try:
                         obj = json.loads(data)
-                        txt = obj["choices"][0].get("text", "")
+                        # capture usage first (before accessing choices, may be empty)
+                        if "usage" in obj and obj["usage"]:
+                            raw_usage = obj["usage"]
+                        choices = obj.get("choices", [])
+                        if not choices:
+                            continue
+                        txt = choices[0].get("text", "")
                         now = time.time()
                         if txt and first_chunk is None:
                             first_chunk = now
                         if txt:
                             parts.append(txt)
                             last_chunk = now
-                        # capture usage for accurate token counts
-                        if "usage" in obj and obj["usage"]:
-                            raw_usage = obj["usage"]
-                    except (json.JSONDecodeError, KeyError, IndexError):
+                    except (json.JSONDecodeError, KeyError):
                         pass
     except Exception as e:
         err = repr(e)
