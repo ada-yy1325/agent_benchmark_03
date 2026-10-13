@@ -146,6 +146,7 @@ async def one_request(client, args, tokenizer, prompt_ids, idx):
         "last": last_chunk,
         "text": "".join(parts),
         "n_out": len(parts),
+        "raw_usage": {},
         "err": err,
         "fallback_used": fallback_used,
     }
