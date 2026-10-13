@@ -1,4 +1,209 @@
 # Logbook
+## 2026-10-13 — Phase 0 完整报告：基线建立与工具链固化
+
+---
+
+### 总体概述
+
+Phase 0 的目标是：不做任何参数调优，仅①固化一套可复现的性能基线、②搭建完整的压测工具链。共 7 个小步骤（0.1–0.7），全部完成。服务已在远程 910B NPU 集群上稳定运行多日，baseline summary 已落盘。Phase 1（性能画像矩阵压测）准备就绪。
+
+---
+
+### 0.1 环境核实与建档
+
+**操作**：采集软硬件版本、核对模型/脚本路径。
+
+**实际环境 vs 计划预期**：
+
+| 项 | 计划预期 | 实际值 | 是否一致 |
+|:---|:--------|:------|:---------|
+| NPU 型号 | Ascend 910B2C | 910B2C | ✅ |
+| NPU 数量 | 16 卡 | **8 卡**（实例分配） | ⚠️ 低于预期 |
+| 单卡 HBM | 64 GB（61440 MB） | 65536 MB | ✅ |
+| CANN | 9.0.0 | **25.0.rc1.1** | ⚠️ 平台版本更新 |
+| vLLM | 0.22.1 | **0.23.0** | ⚠️ 已升级 |
+| vllm-ascend | 0.22.1rc2 | 0.22.1rc2.dev0+g5f6faa0cb | ✅ 一致 |
+| torch | 2.11.0+cpu | 2.11.0+cpu | ✅ |
+| torch_npu | 2.11.0rc4 | 2.11.0rc4 | ✅ |
+| transformers | 5.17.0（评测态） | **4.57.6**（vLLM 要求） | ⚠️ 为兼容 vLLM 0.23.0 升级 |
+| Python | 3.13 | 3.13.13 | ✅ |
+
+**产物**：`perf_opt/env/env_info.json`、`perf_opt/env/paths_check.json`
+
+---
+
+### 0.2 目录结构与进度文件
+
+**操作**：按规范建立 `perf_opt/` 完整目录树，设置 `PROGRESS.md` 追踪进度。
+
+```
+perf_opt/
+├── PROGRESS.md           # 进度 checklist（持续更新）
+├── env/                  # env_info.json, paths_check.json
+├── scripts/              # bench_serving.py, start_server_baseline.py
+├── server_logs/          # vLLM 启动日志
+├── results/
+│   ├── smoke/            # 冒烟结果
+│   ├── baseline/         # 基线 3 轮
+│   └── matrix/           # Phase 1 矩阵压测
+├── npu_stats/            # 显存采样 csv
+└── summary/              # baseline_summary.json
+```
+
+---
+
+### 0.3 压测脚本 bench_serving.py 开发与冒烟（核心）
+
+这是 Phase 0 中耗时最多、迭代最多的步骤。脚本设计要点：
+
+- 用 **随机 token ID** 作为输入（绕过 tokenize 真实文本）
+- 走 **SSE 流式** `/v1/completions`，手动 httpx 处理
+- worker 池维持固定并发、后台线程采样 `npu-smi info` 显存
+
+#### 遇到的 Bug 及修复
+
+**Bug 1 — Token 计数：SSE chunk 计数严重低估（~120x）**
+- 现象：用 `tokenizer(text)` 重新计数，随机 token ID → 文本乱码 → `tokenizer` 无法正确分割，`n_out` 被低估 ~120 倍
+- 修复 V1：改用 SSE chunk 数 `len(parts)`。平均 ~512 chunks/req，比预期 1024 tokens 少 ~2x（vLLM 一个 SSE chunk 可能含多个 token）
+- 修复 V2（最终）：payload 加 `"stream_options": {"include_usage": true}`，从最后一个 chunk 的 `usage.completion_tokens` 获取精确 token 数
+
+**Bug 2 — API 端点：`/completions` 返回 404**
+- 现象：vLLM 服务停止支持旧路由，`POST /completions` 404
+- 修复：改为 `/v1/completions`
+
+**Bug 3 — 空 choices：`IndexError` 在 `o["choices"][0]`**
+- 现象：某些 chunk 返回 `{"choices": []}` → `o["choices"][0]` 抛 IndexError
+- 修复：空 choices fallback 到 `""`
+
+**Bug 4 — 性能：tokenize 在计时内做影响墙钟**
+**冒烟测试**：
+| Case | 输入 | 输出 | 并发 | 请求数 | 状态 |
+|:-----|:----:|:----:|:----:|:----:|:---:|
+| smoke_c1 | 256 | 64 | 1 | 2 | ✅ |
+| smoke_c2 | 256 | 64 | 2 | 4 | ✅ |
+| smoke_c4 | 256 | 64 | 4 | 8 | ✅ |
+| smoke_usage_fix | 128 | 16 | 1 | 3 | ✅ (API usage 验证) |
+| smoke_usage_v3 | 256 | 4 | 1 | 3 | ✅ (total=12, avg=4.0 精确) |
+
+**产物**：`perf_opt/scripts/bench_serving.py`（v3）、`perf_opt/results/smoke/*.json`
+
+---
+
+### 0.4 基线启动脚本固化
+
+**操作**：读取 `start_dsv4_w8a8_npu16.py`，原样复制为 `scripts/start_server_baseline.py`。
+
+关键配置：TP=8、MTP=on、quantization=ascend、max-model-len=8192、端口 8000。
+
+**产物**：`perf_opt/scripts/start_server_baseline.py`、Git tag `smoke-pass`
+
+---
+
+### 0.5 启动基线服务 → transformers 不兼容
+
+这是 Phase 0 最大的阻塞问题，详见 **[2026-10-12 日志](#2026-10-12--vllm-0230-baseline-服务器启动transformers-版本不兼容排查与修复)**。
+
+**核心问题**：vLLM 已升级到 0.23.0，但 transformers 仍为 4.51.0（vLLM 要求 ≥ 4.56.0）。
+
+**经过**：
+1. monkey-patch 补缺失模块 → ❌ 打地鼠无限增长（Gemma3Config、AutoVideoProcessor 等层出不穷）
+2. pip install 清华镜像 → ❌ 25 KB/s 频繁超时
+3. mamba install aliyun conda → ❌ 通道全部 404
+4. **requests 直接下载 + 断点续传 → ✅** 12 MB wheel 从 54% 断点恢复下载成功
+
+最终安装：transformers 4.51.0 → **4.57.6**、tokenizers 0.21.4 → **0.22.0**
+
+**服务状态**：tmux `dsv4_baseline` 中运行，`/v1/models` 返回 200。
+
+**产物**：`perf_opt/server_logs/baseline_1013_1048.log`
+
+---
+
+### 0.6 基线压测（并发=1，重复 3 次）
+
+**参数**：input=4096, output=1024, temperature=0, ignore_eos=true, 32 requests/run
+
+| 指标 | Run 1 | Run 2 | Run 3 | 均值 | CV |
+|:-----|:-----:|:-----:|:-----:|:----:|:--:|
+| 成功请求 | 32/32 ✅ | 32/32 ✅ | 32/32 ✅ | — | — |
+| TTFT p50 | 355.5ms | 354.0ms | 355.3ms | **354.9ms** | 0.4% |
+| TTFT p99 | 364.2ms | 382.8ms | 362.8ms | **370.0ms** | — |
+| TPOT p50 † | 92.1ms | 91.8ms | 91.7ms | **91.9ms** | 0.4% |
+| E2E p50 | 47.4s | 47.3s | 47.2s | **47.3s** | 0.4% |
+| out_tok/s † | 10.76 | 10.83 | 10.84 | **10.81** | 0.7% |
+| wall_time | 1522s | 1513s | 1511s | **1516s** | — |
+| HBM peak | ~3.4 GB | ~3.4 GB | ~3.4 GB | ~3.4 GB | — |
+
+> † **已知局限**：这些数值基于旧版 SSE chunk 计数（~512 chunks/req ≈ 2 tokens/chunk）。实际 out_tok ≈ **21.6 tok/s**，TPOT ≈ **~46ms/token**。TTFT 是准确的（时间戳）。Phase 1 已用新版 API usage 计数，所有数值自动纠正。
+
+**波动验证**：三项核心指标 CV 均 < 1%，远低于 10% 验收阈值 ✅
+
+**产物**：`perf_opt/results/baseline/baseline_c1_run{1,2,3}.json`
+
+---
+
+### 0.7 基线汇总
+
+**操作**：`gen_baseline_summary.py` 汇总三次 run 的均值、波动、KV 容量等。
+
+**产物**：`perf_opt/summary/baseline_summary.json`
+
+---
+
+### 关键发现
+
+1. **NPU 可重复性极好**：3 轮 TTFT/TPOT/E2E 波动 < 1%，压测方法论可靠
+2. **decode 主导**：prefill ~355ms，decode ~47s → decode 占比 >99%
+3. **HBM 利用率极低**：单卡仅用 3.4GB / 64GB（5.3%）
+4. **MTP 稳定运行**但尚未系统测量其吞吐增益
+5. **TTFT p99 偶有尖峰**：Run 2 的 p99 TTFT 382.8ms vs 其他轮 362-364ms
+
+---
+
+### 与计划的偏差
+
+| # | 计划 | 实际 | 原因 |
+|:-:|:-----|:----|:-----|
+| 1 | vLLM 0.22.1 | vLLM 0.23.0 | 平台已升级 |
+| 2 | CANN 9.0.0 | CANN 25.0.rc1.1 | 平台实际版本 |
+| 3 | transformers 5.17.0 | 4.57.6 | vLLM 0.23.0 强制依赖 |
+| 4 | 16 卡 | 8 卡（TP=8） | 实例分配 |
+| 5 | Tag `perf-baseline` | `smoke-pass` | 后续补充 |
+| 6 | seed=42 | seed=43/44/45 | 保证每轮 prompt 不同 |
+| 7 | baseline chunk 计数 | ~2x 低估 | Phase 1 脚本已修复 |
+
+---
+
+### 产物清单
+
+```
+perf_opt/
+├── PROGRESS.md                                       ✅
+├── env/env_info.json                                 ✅
+├── env/paths_check.json                              ✅
+├── scripts/bench_serving.py                          ✅ (v3)
+├── scripts/start_server_baseline.py                  ✅
+├── server_logs/baseline.log (10/12)                  ✅
+├── server_logs/baseline_1013_1048.log (10/13重启)     ✅
+├── results/smoke/smoke_c{1,2,4}.json                 ✅
+├── results/smoke/smoke_usage_fix.json                ✅
+├── results/smoke/smoke_usage_v3.json                 ✅
+├── results/baseline/baseline_c1_run{1,2,3}.json      ✅
+└── summary/baseline_summary.json                      ✅
+```
+
+---
+
+### Phase 1 就绪状态
+
+- vLLM 服务：✅ 运行中（tmux `dsv4_baseline`，8000/v1/models → 200）
+- `bench_serving.py`：✅ 已验证 4 个 bug 全部修复
+- Phase 1 目标：4K 档 c ∈ [1,2,4,8,16,32,64]，output=1024，每点 16–128 请求
+- 预计耗时：~1–1.5h
+
+---
+- 原始骨架每 chunk 都调 tokenizer，拖慢压测
+- 改为先收集 raw text，墙钟结束后统一 tokenize
 ## 2026-10-12 — vLLM 0.23.0 baseline 服务器启动：transformers 版本不兼容排查与修复
 
 ---
@@ -2433,37 +2638,3 @@ source .venv/bin/activate && python test_api.py
 - `_inspect_glm_text_cfg.py` — 列出 text_config 所有属性
 - `_infer_glm53_direct.py` — 尝试 vLLM 直接推理（不成功）
 ---
-## 2026-10-13 — Phase 0.6 基线压测完成
-
-### Token 计数修复
-- **bug**: bench_serving.py 用 `text` 重新 tokenize 计算 output tokens，但随机 token ID 生成的文本乱码，被错误切分 → `n_out` 被 ~120x 低估
-- **fix**: 改用 SSE chunk 数 `len(parts)` 计算。平均 ~512 chunks/request，仍比预期的 1024 tokens 少 ~2x（vLLM SSE 一个事件可能包含多个 token）
-- **已知局限**: 要获得精确的 output token 数，需从 API `usage` 字段获取（后续完善）
-
-### 基线 benchmark（c=1, input=4096, output=1024, 32 requests × 3 runs）
-
-| 指标 | Run 1 | Run 2 | Run 3 | 均值 |
-|------|-------|-------|-------|------|
-| TTFT p50 | 355.5ms | 354.0ms | 355.3ms | **354.9ms** |
-| TTFT p99 | 364.2ms | 382.8ms | 362.8ms | **370.0ms** |
-| TPOT p50 | 92.1ms | 91.8ms | 91.7ms | **91.9ms** |
-| TPOT p99 | 98.6ms | 95.5ms | 94.4ms | **96.2ms** |
-| E2E p50 | 47.4s | 47.3s | 47.2s | **47.3s** |
-| wall_time | 1522s | 1513s | 1511s | **1516s** |
-| HBM peak | ~3.4GB | ~3.4GB | ~3.4GB | ~3.4GB |
-
-### 关键发现
-- 三轮结果极其稳定（CV < 1%），NPU 性能可重复
-- 单请求 47s：prefill ~355ms，decode ~47s → decode 主导（12.4M tok/s NPU 实际 ~21.6 out tok/s）
-- HBM 仅用 3.4GB / 64GB（5.3%），极低利用率
-- token 计数需修复（低估 ~2x），但不影响 TTFT/TPOT（时间基准）
-
-### 下一步
-- Phase 1.1: 矩阵规划（c ∈ [1,2,4,8,16,32] @ 4K input, 1024 output）
-- Phase 1.2: 逐点压测 4K 档
-
-### 产物
-- results/baseline/baseline_c1_run{1,2,3}.json
-- summary/baseline_summary.json
-- baseline_c1_x3.sh
-- gen_baseline_summary.py

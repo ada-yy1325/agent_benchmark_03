@@ -18,6 +18,7 @@
   - mean TTFT=347.6ms TPOT=92.0ms throughput≈10.8 out_tok/s (~21.6 actual)
   - 🔧 注意：基线 runs 使用 chunk 计数（~512/req），已修复为新版 `usage` 精确计数（phase 1 跑时会用新方法）
   - 🔧 /v1/completions 端点变更：服务可能被重启，新版代码已改用 `/v1/completions`
+  - 📝 完整 Phase 0 报告已写入 logbook.md 顶部（2026-10-13），含环境差异、所有 bug 修复过程、基线数据、经验教训
 
 ## 阶段 1 · 性能画像
 - [ ] 1.1 矩阵规划（先跑 4K 档）产物：summary/matrix_plan（写在 findings.md 顶部）
