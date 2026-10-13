@@ -35,7 +35,7 @@ SEED = 42
 
 
 def clamp_requests(c):
-    return max(min(c * 8, 128), 16)
+    return max(min(c * 4, 128), 4)
 
 
 # ── 矩阵定义 ──────────────────────────────────────────
@@ -98,7 +98,7 @@ def run_case(c, planned, case_id):
     log(f"  命令: {' '.join(cmd[:8])} ...")
 
     t0 = time.time()
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
+    result = subprocess.run(cmd, capture_output=False, text=True, timeout=7200)
     elapsed = time.time() - t0
 
     if result.returncode == 0:
@@ -108,18 +108,6 @@ def run_case(c, planned, case_id):
 
     log(f"  结果: {success} | 耗时: {elapsed:.0f}s | returncode={result.returncode}")
 
-    # 打印关键行
-    for line in result.stdout.strip().split("\n"):
-        line = line.strip()
-        if line and ("ok" in line.lower() or "error" in line.lower() or "total" in line.lower() or "bench" in line.upper()):
-            log(f"  stdout: {line}")
-
-    if result.stderr.strip():
-        # 只打印最后 5 行 stderr
-        stderr_lines = result.stderr.strip().split("\n")
-        for line in stderr_lines[-5:]:
-            if line.strip():
-                log(f"  stderr: {line.strip()}")
 
     if result.returncode != 0:
         log(f"  ⚠ {case_id} 失败，继续下一个")
