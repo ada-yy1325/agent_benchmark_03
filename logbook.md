@@ -1,4 +1,115 @@
 # Logbook
+## 2026-10-12 — vLLM 0.23.0 baseline 服务器启动：transformers 版本不兼容排查与修复
+
+---
+
+### 一、任务目标
+
+启动 vLLM baseline 服务器（`start_server_baseline.py`），为 phase 0.6 基准压测做准备。
+- 实例：quant-test（16 × Ascend 910B2C，64GB HBM/卡）
+- 模型：DeepSeek-V4-Flash-w8a8-self（自量化 W8A8）
+- 配置：TP=8, EP=8, MTP=on, port 8000
+
+### 二、问题发现：vLLM 导入全面崩溃
+
+#### 现象
+```python
+from vllm.entrypoints.openai.api_server import run_server
+```
+直接报错：
+```
+ImportError: cannot import name 'AutoVideoProcessor' from 'transformers'
+```
+
+随后逐个暴露的缺失模块/类：
+- `from transformers import Gemma3Config`
+- `from transformers import AutoVideoProcessor`
+- `ALLOWED_ATTENTION_LAYER_TYPES` / `ALLOWED_LAYER_TYPES`
+- `import transformers.video_processing_utils`
+- `from transformers.video_utils import VideoInput`
+
+#### 根因定位
+
+| 包 | 已安装版本 | vLLM 0.23.0 要求的版本 |
+|----|-----------|------------------------|
+| **transformers** | 4.51.0 ❌ | **>= 4.56.0** |
+| **tokenizers** | 0.21.4 ❌ | **>= 0.22.0**（transformers 4.57.6 强制依赖） |
+
+查 vLLM 0.23.0 的 METADATA 确认：
+```
+Requires-Dist: transformers!=5.0.*,!=5.1.*,!=5.2.*,!=5.3.*,!=5.4.*,!=5.5.0,>=4.56.0
+```
+
+**根因：vLLM 在某个时间点从 0.22.x 升级到了 0.23.0，但 transformers 没有被同步升级**（之前 vLLM 0.22.1 + transformers 4.51.0 是兼容的，GPQA 72.22% 就是在这个组合下跑的）。
+
+### 三、弯路记录：为什么打了这么多补丁还是没用
+
+#### 尝试 1：逐个 monkey-patch（❌ 失败）
+- 创建 `fix_and_launch.py`，在导入 vLLM 之前动态注入缺失的类和模块
+- 遇到的坑：
+  - transformers 的 `_LazyModule` 需要**同时更新** `_import_structure` 和 `_class_to_module`，只改一个不够
+  - `sys.meta_path` 的 `find_spec` 不能在其中调用 `importlib.import_module`，会导致递归爆炸
+  - Finder 放在 `meta_path` 末尾才能避免干扰正常模块加载
+  - 即使模块级导入成功，`from module import Class` 仍会失败——因为 dummy `ModuleType` 里没有对应属性
+  - 用 `__getattr__` 自动生成 dummy 类可以解决属性导入，但不断有新的缺失模块冒出来
+
+**结论：打地鼠不可行。vLLM 0.23.0 依赖 transformers 5.x 的模块太多了（video_processing_utils, video_utils, image_utils 等），补丁永远打不完。**
+
+#### 尝试 2：pip install（❌ 超时）
+- 远程网络访问 PyPI 清华镜像速度极慢（~25 KB/s）
+- `inspire notebook exec` 对长时间命令不稳定（JupyterTerminal 容易断开）
+- transformers wheel 12 MB，理论上需要 ~8 分钟，但多次超时/中断
+
+#### 尝试 3：mamba install（❌ 通道 404）
+```
+mamba install 'transformers>=4.56.0'
+```
+失败原因：镜像中的 aliyun conda 通道 repo 数据 404（`https://mirrors.aliyun.com/anaconda/...` 全部不可达）
+
+#### 尝试 4：requests 直接下载 + 断点续传（✅ 成功）
+- 用 `requests.Session()` + `User-Agent: pip/26.0.1` 解决清华镜像的 403 防盗链
+- 实现断点续传（`Range` 头），网络中断后自动从断点继续
+- 下载脚本 `dl_tf.py` 从 54% 断点自动恢复，最终 12 MB 下载成功
+
+### 四、最终解决方案（一步到位）
+
+```bash
+# 1. 下载 transformers 4.57.6 wheel（12 MB，清华镜像）
+python3 dl_tf.py  # 带 UA 头 + 断点续传
+
+# 2. 安装
+pip install --no-deps transformers-4.57.6-py3-none-any.whl
+
+# 3. tokenizers 自动跟随升级（pip 走华为云镜像，速度快）
+pip install --no-deps tokenizers==0.22.0
+```
+
+**结果**：
+- transformers: 4.51.0 → **4.57.6** ✅
+- tokenizers: 0.21.4 → **0.22.0** ✅
+- vLLM 导入成功，服务器正常启动，模型加载中（76 分片，8 卡并行）
+
+### 五、经验教训
+
+| # | 教训 | 详情 |
+|:-|:----|:-----|
+| 1 | **遇到 import 错误先查依赖版本** | vLLM METADATA 里写得清清楚楚 `transformers>=4.56.0`，如果一开始就查就不需要打那么多补丁 |
+| 2 | **monkey-patch 治标不治本** | 缺失模块是结构性版本不兼容，不是一两个 API 改名，补丁数量会无限增长 |
+| 3 | **conda 通道 vs pip** | 远程机器的 conda 通道配置有问题（aliyun 404），装纯 Python 包直接用 pip |
+| 4 | **清华镜像防盗链** | 需要加 `User-Agent` 头（模拟 pip），否则 403 Forbidden |
+| 5 | **大文件下载要支持断点续传** | 远程网络不稳定（中断、403、超时），`Range` 头 + 自动重试是必须的 |
+| 6 | **`inspire notebook exec` 不适合长时间命令** | JupyterTerminal 对超时敏感，长时间任务必须放 tmux 里跑 |
+
+### 六、当前状态（10-12 17:00）
+
+- vLLM baseline 服务器：✅ 运行中（tmux `dsv4_baseline`，端口 8000）
+- 模型：DeepSeek-V4-Flash-w8a8-self（TP=8, EP=8, MTP=on）
+- API 路由已注册：`/v1/completions`, `/v1/chat/completions` 等
+- 下一步：phase 0.6 基准压测（`bench_serving.py`）
+- `fix_and_launch.py` / `_patch_transformer_init.py`：已废弃，不再需要
+
+---
+
 ## 2026-10-09（晚间）— 自量化最终完成 & GPQA 复测 & 收尾
 
 ---

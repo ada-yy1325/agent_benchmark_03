@@ -145,6 +145,7 @@ async def one_request(client, args, tokenizer, prompt_ids, idx):
         "first": first_chunk,
         "last": last_chunk,
         "text": "".join(parts),
+        "n_out": len(parts),
         "err": err,
         "fallback_used": fallback_used,
     }
@@ -222,17 +223,13 @@ async def main():
     print(f"[bench] NPU stats saved ({len(sampler.rows)} samples)", flush=True)
 
     ok = [r for r in records if r["err"] is None and r["first"] is not None]
-    out_tokens_list = []
-    for r in ok:
-        encoded = tokenizer(r["text"], add_special_tokens=False)["input_ids"]
-        out_tokens_list.append(len(encoded))
+    out_tokens_list = [r["n_out"] for r in ok]
     out_tokens = sum(out_tokens_list)
     in_tokens = args.input_len * len(ok)
 
     ttfts, tpots, e2es = [], [], []
     for r in ok:
-        encoded = tokenizer(r["text"], add_special_tokens=False)["input_ids"]
-        n_out = len(encoded)
+        n_out = r["n_out"]
         ttft = (r["first"] - r["t0"]) * 1000
         tpot = (r["last"] - r["first"]) * 1000 / max(1, n_out - 1) if n_out > 1 else 0.0
         e2e = (r["last"] - r["t0"]) * 1000
