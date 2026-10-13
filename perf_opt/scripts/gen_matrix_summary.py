@@ -66,6 +66,9 @@ def make_summary_json(cases):
         }
 
     return {"generated": datetime.now().isoformat(), "num_cases": len(cases),
+            "cases": cases, "aggregates": aggregates}
+
+
 def make_csv(cases):
     fields = [
         "case_id", "input_len", "concurrency",
