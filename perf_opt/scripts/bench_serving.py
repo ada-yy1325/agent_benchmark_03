@@ -94,13 +94,13 @@ async def one_request(client, args, tokenizer, prompt_ids, idx):
     fallback_used = False
 
     try:
-        async with client.stream("POST", "/completions", json=payload) as resp:
+        async with client.stream("POST", "/v1/completions", json=payload) as resp:
             if resp.status_code != 200:
                 # Fallback: decode prompt to text
                 fallback_used = True
                 text_prompt = tokenizer.decode(prompt_ids)
                 payload["prompt"] = text_prompt
-                async with client.stream("POST", "/completions", json=payload) as resp2:
+                async with client.stream("POST", "/v1/completions", json=payload) as resp2:
                     if resp2.status_code != 200:
                         err = f"HTTP {resp2.status_code}: {await resp2.aread()}"
                     else:
