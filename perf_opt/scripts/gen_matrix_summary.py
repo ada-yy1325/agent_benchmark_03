@@ -47,10 +47,14 @@ def make_summary_json(cases):
         sweet = sweet_cases[0] if sweet_cases else None
 
         degrade = None
+        peak_met = False
         for c in case_list:
             if c["success_rate"] < 0.95:
                 degrade = c; break
-            if peak_tok > 0 and c["output_tokens_per_s"] < peak_tok * 0.8:
+            # 只有经过吞吐峰值后才检测下降（跳过 ramp-up 阶段）
+            if c["output_tokens_per_s"] >= peak_tok * 0.8:
+                peak_met = True
+            elif peak_met and c["output_tokens_per_s"] < peak_tok * 0.8:
                 degrade = c; break
 
         tag = f"{il // 1024}K" if il % 1024 == 0 else str(il)
