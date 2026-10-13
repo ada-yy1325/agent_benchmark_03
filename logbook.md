@@ -2432,3 +2432,38 @@ source .venv/bin/activate && python test_api.py
 - `_inspect_glm_cfg.py` — 列出 Glm5NextConfig 所有属性
 - `_inspect_glm_text_cfg.py` — 列出 text_config 所有属性
 - `_infer_glm53_direct.py` — 尝试 vLLM 直接推理（不成功）
+---
+## 2026-10-13 — Phase 0.6 基线压测完成
+
+### Token 计数修复
+- **bug**: bench_serving.py 用 `text` 重新 tokenize 计算 output tokens，但随机 token ID 生成的文本乱码，被错误切分 → `n_out` 被 ~120x 低估
+- **fix**: 改用 SSE chunk 数 `len(parts)` 计算。平均 ~512 chunks/request，仍比预期的 1024 tokens 少 ~2x（vLLM SSE 一个事件可能包含多个 token）
+- **已知局限**: 要获得精确的 output token 数，需从 API `usage` 字段获取（后续完善）
+
+### 基线 benchmark（c=1, input=4096, output=1024, 32 requests × 3 runs）
+
+| 指标 | Run 1 | Run 2 | Run 3 | 均值 |
+|------|-------|-------|-------|------|
+| TTFT p50 | 355.5ms | 354.0ms | 355.3ms | **354.9ms** |
+| TTFT p99 | 364.2ms | 382.8ms | 362.8ms | **370.0ms** |
+| TPOT p50 | 92.1ms | 91.8ms | 91.7ms | **91.9ms** |
+| TPOT p99 | 98.6ms | 95.5ms | 94.4ms | **96.2ms** |
+| E2E p50 | 47.4s | 47.3s | 47.2s | **47.3s** |
+| wall_time | 1522s | 1513s | 1511s | **1516s** |
+| HBM peak | ~3.4GB | ~3.4GB | ~3.4GB | ~3.4GB |
+
+### 关键发现
+- 三轮结果极其稳定（CV < 1%），NPU 性能可重复
+- 单请求 47s：prefill ~355ms，decode ~47s → decode 主导（12.4M tok/s NPU 实际 ~21.6 out tok/s）
+- HBM 仅用 3.4GB / 64GB（5.3%），极低利用率
+- token 计数需修复（低估 ~2x），但不影响 TTFT/TPOT（时间基准）
+
+### 下一步
+- Phase 1.1: 矩阵规划（c ∈ [1,2,4,8,16,32] @ 4K input, 1024 output）
+- Phase 1.2: 逐点压测 4K 档
+
+### 产物
+- results/baseline/baseline_c1_run{1,2,3}.json
+- summary/baseline_summary.json
+- baseline_c1_x3.sh
+- gen_baseline_summary.py

@@ -83,11 +83,13 @@ async def one_request(client, args, tokenizer, prompt_ids, idx):
         "stream": True,
         "ignore_eos": True,
         "seed": args.seed,
+        "stream_options": {"include_usage": True},
     }
     t0 = time.time()
     first_chunk = None
     last_chunk = t0
     parts = []
+    raw_usage = {}
     err = None
     fallback_used = False
 
@@ -117,7 +119,10 @@ async def one_request(client, args, tokenizer, prompt_ids, idx):
                                 if txt:
                                     parts.append(txt)
                                     last_chunk = now
-                            except (json.JSONDecodeError, KeyError):
+                                # capture usage for accurate token counts
+                                if "usage" in obj and obj["usage"]:
+                                    raw_usage = obj["usage"]
+                            except (json.JSONDecodeError, KeyError, IndexError):
                                 pass
             else:
                 async for line in resp.aiter_lines():
@@ -135,7 +140,10 @@ async def one_request(client, args, tokenizer, prompt_ids, idx):
                         if txt:
                             parts.append(txt)
                             last_chunk = now
-                    except (json.JSONDecodeError, KeyError):
+                        # capture usage for accurate token counts
+                        if "usage" in obj and obj["usage"]:
+                            raw_usage = obj["usage"]
+                    except (json.JSONDecodeError, KeyError, IndexError):
                         pass
     except Exception as e:
         err = repr(e)
@@ -146,7 +154,7 @@ async def one_request(client, args, tokenizer, prompt_ids, idx):
         "last": last_chunk,
         "text": "".join(parts),
         "n_out": len(parts),
-        "raw_usage": {},
+        "raw_usage": raw_usage,
         "err": err,
         "fallback_used": fallback_used,
     }
@@ -224,15 +232,27 @@ async def main():
     print(f"[bench] NPU stats saved ({len(sampler.rows)} samples)", flush=True)
 
     ok = [r for r in records if r["err"] is None and r["first"] is not None]
-    out_tokens_list = [r["n_out"] for r in ok]
+    out_tokens_list = []
+    for r in ok:
+        usage = r.get("raw_usage", {})
+        if usage and "completion_tokens" in usage:
+            out_tokens_list.append(usage["completion_tokens"])
+        else:
+            out_tokens_list.append(r["n_out"])
     out_tokens = sum(out_tokens_list)
     in_tokens = args.input_len * len(ok)
 
     ttfts, tpots, e2es = [], [], []
     for r in ok:
-        n_out = r["n_out"]
+        usage = r.get("raw_usage", {})
+        completion_tokens = usage.get("completion_tokens") if usage else None
+        if completion_tokens is None:
+            completion_tokens = r["n_out"]  # fallback to chunk count
         ttft = (r["first"] - r["t0"]) * 1000
-        tpot = (r["last"] - r["first"]) * 1000 / max(1, n_out - 1) if n_out > 1 else 0.0
+        if completion_tokens > 1:
+            tpot = (r["last"] - r["first"]) * 1000 / (completion_tokens - 1)
+        else:
+            tpot = 0.0
         e2e = (r["last"] - r["t0"]) * 1000
         ttfts.append(ttft)
         tpots.append(tpot)

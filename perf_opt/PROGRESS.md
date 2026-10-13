@@ -10,8 +10,13 @@
   - smoke_c4: 8/8 ✅ TTFT=283.99ms TPOT=367.94ms
 - [ ] 0.4 固化基线启动脚本     产物：scripts/start_server_baseline.py（git tag smoke-pass）
 - [ ] 0.5 启动基线服务+冒烟    产物：server_logs/baseline.log（已在 tmux dsv4_baseline 运行中）
-- [ ] 0.6 基线压测 c=1 ×3      产物：results/baseline/baseline_c1_run{1,2,3}.json
-- [ ] 0.7 基线汇总             产物：summary/baseline_summary.json
+- [x] 0.6 基线压测 c=1 ×3      产物：results/baseline/baseline_c1_run{1,2,3}.json
+  - run1: 32/32 ✅ wall=1522s TTFT p50=355.5ms TPOT p50=92.1ms
+  - run2: 32/32 ✅ wall=1513s TTFT p50=354.0ms TPOT p50=91.8ms
+  - run3: 32/32 ✅ wall=1511s TTFT p50=355.3ms TPOT p50=91.7ms
+- [x] 0.7 基线汇总             产物：summary/baseline_summary.json
+  - mean TTFT=347.6ms TPOT=92.0ms throughput≈10.8 out_tok/s (~21.6 actual)
+  - 🔧 已知: output_tokens_per_s 被 ~2x 低估 (vLLM SSE multi-token chunk)
 
 ## 阶段 1 · 性能画像
 - [ ] 1.1 矩阵规划（先跑 4K 档）产物：summary/matrix_plan（写在 findings.md 顶部）
