@@ -36,11 +36,25 @@ def wait_healthy(max_wait=600):
 
 def kill_server():
     print("  [STOP] Killing old vLLM...", flush=True)
-    os.system("pkill -9 -f 'api_server' 2>/dev/null")
-    os.system("pkill -9 -f 'vllm.entrypoints' 2>/dev/null")
+    # Kill VLLM processes by their actual process names on this platform
+    os.system("pkill -9 -f 'VLLM::EngineC' 2>/dev/null")
+    os.system("pkill -9 -f 'VLLM::Worke' 2>/dev/null")
+    # Also kill any python process serving on port 8000
+    os.system("fuser -k 8000/tcp 2>/dev/null")
     time.sleep(5)
     os.system("fuser -k 8000/tcp 2>/dev/null")
     time.sleep(3)
+    # Verify port is free
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    result = s.connect_ex(('127.0.0.1', 8000))
+    s.close()
+    if result == 0:
+        print("  [WARN] Port 8000 still occupied! Retrying pkill...", flush=True)
+        os.system("pkill -9 -f 'VLLM' 2>/dev/null")
+        time.sleep(5)
+        os.system("fuser -k 8000/tcp 2>/dev/null")
+        time.sleep(3)
 
 def start_server(batched_tokens):
     name = f"sched_bat{batched_tokens}"
