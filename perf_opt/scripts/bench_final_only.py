@@ -15,11 +15,12 @@ def run(conc):
     npu_csv = OUT_DIR / f"{label}_npu.csv"
     cmd = [
         "/opt/mamba/bin/python3", str(BENCH),
-        "--model", "dsv4",
+        "--served-name", "dsv4",
+        "--model-dir", "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-self",
         "--base-url", "http://127.0.0.1:8000/v1",
-        "--inp", str(INP), "--out", str(OUT),
+        "--input-len", str(INP), "--output-len", str(OUT),
         "--concurrency", str(conc),
-        "--num-prompts", str(NREQ),
+        "--num-requests", str(NREQ),
         "--out", str(out_json),
         "--case-id", label,
         "--npu-stats", str(npu_csv),
