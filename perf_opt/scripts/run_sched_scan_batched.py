@@ -61,24 +61,30 @@ def start_server(batched_tokens):
     os.system(f"tmux kill-session -t {name} 2>/dev/null")
     workdir = str(Path(__file__).resolve().parent.parent)
     script = str(Path(__file__).resolve().parent / "start_server_param.py")
-    # Use bash -c to handle the long command safely
-    inner = f"cd {workdir} && /opt/mamba/bin/python3 {script} --batched {batched_tokens} --port 8000 --max-seqs 32"
-    cmd = f"tmux new-session -d -s {name} bash -c '{inner} 2>&1'"
-    print(f"  [START] tmux:{name} batched={batched_tokens}", flush=True)
-    os.system(cmd)
-    time.sleep(5)
+    # Write a one-liner wrapper to avoid quoting issues
+    wrapper = OUT_DIR / f"_start_{batched_tokens}.sh"
+    with open(wrapper, "w") as f:
+        f.write(f"#!/bin/bash\nexport PATH=/opt/mamba/bin:$PATH\ncd {workdir}\nexec python3 {script} --batched {batched_tokens} --port 8000 --max-seqs 32\n")
+    os.chmod(wrapper, 0o755)
+    os.system(f"tmux new-session -d -s {name} bash {wrapper}")
+    print(f"  [START] tmux:{name} batched={batched_tokens} script={wrapper}", flush=True)
+    time.sleep(3)
 
 def run_bench(batched, cid, inp, out, conc, nreq):
     label = f"bat{batched}_{cid}"
     out_json = OUT_DIR / f"{label}.json"
+    npu_csv = OUT_DIR / f"{label}_npu.csv"
+    case_id = f"bat{batched}_{cid}"
     cmd = [
         "/opt/mamba/bin/python3", str(BENCH),
         "--base-url", BASE_URL, "--served-name", SERVED,
         "--model-dir", MODEL_DIR,
+        "--case-id", case_id,
+        "--out", str(out_json),
+        "--npu-stats", str(npu_csv),
         "--input-len", str(inp), "--output-len", str(out),
         "--concurrency", str(conc), "--num-requests", str(nreq),
-        "--result-file", str(out_json),
-        "--seed", "42", "--temperature", "0", "--ignore-eos", "true",
+        "--temp", "0", "--seed", "42",
     ]
     t0 = time.time()
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
@@ -87,13 +93,13 @@ def run_bench(batched, cid, inp, out, conc, nreq):
         with open(out_json) as f:
             data = json.load(f)
         try:
-            s = data["benchmark"]["bench_stats"]
             return {
                 "batched": batched, "case": cid,
-                "ttft_p50": s["ttft_p50_ms"], "tpot_p50": s["tpot_p50_ms"],
-                "tp": s["output_tokens_per_second"],
-                "ok": data["benchmark"]["num_completed"],
-                "total": data["benchmark"]["num_total"],
+                "ttft_p50": data["ttft_ms"]["p50"],
+                "tpot_p50": data["tpot_ms"]["p50"],
+                "tp": data["output_tokens_per_s"],
+                "ok": data["successful_requests"],
+                "total": data["planned_requests"],
                 "wall_s": round(wall), "success": True,
             }
         except KeyError as e:
