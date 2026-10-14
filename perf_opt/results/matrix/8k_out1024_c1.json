@@ -1,0 +1,48 @@
+{
+  "case_id": "8k_out1024_c1",
+  "input_len": 8192,
+  "output_len": 1024,
+  "concurrency": 1,
+  "temperature": 0.0,
+  "ignore_eos": true,
+  "seed": 42,
+  "planned_requests": 4,
+  "successful_requests": 4,
+  "failed_requests": 0,
+  "wall_time_s": 197.306,
+  "total_input_tokens": 32768,
+  "total_output_tokens": 4096,
+  "output_tokens_per_s": 20.76,
+  "total_tokens_per_s": 186.84,
+  "ttft_ms": {
+    "p50": 607.79,
+    "p90": 678.9,
+    "p99": 705.97,
+    "mean": 620.99
+  },
+  "tpot_ms": {
+    "p50": 47.62,
+    "p90": 48.24,
+    "p99": 48.36,
+    "mean": 47.57
+  },
+  "e2e_ms": {
+    "p50": 49373.44,
+    "p99": 50041.07
+  },
+  "success_rate": 1.0,
+  "peak_hbm_mb_per_npu": [
+    3417,
+    3411,
+    3413,
+    3411,
+    3416,
+    3413,
+    3413,
+    3411
+  ],
+  "avg_output_tokens_per_request": 1024.0,
+  "fallback_to_text": false,
+  "timestamp": "2026-10-14T10:05:35.974502",
+  "errors": []
+}

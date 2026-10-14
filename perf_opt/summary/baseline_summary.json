@@ -1,0 +1,98 @@
+{
+  "baseline": "c=1, input=4096, output=1024, requests=32",
+  "model": "DeepSeek-V4-Flash-w8a8-self",
+  "hardware": "Ascend 910B2C x8 (TP=8, EP=8, MTP=on)",
+  "timestamp": "2026-10-13T12:45:50.959476",
+  "run_idxs": [
+    1,
+    2,
+    3
+  ],
+  "success_rate": "100% (96/96)",
+  "ttft_mean_ms": 347.6,
+  "ttft_p50_ms": 355.0,
+  "tpot_mean_ms": 92.0,
+  "tpot_p50_ms": 91.9,
+  "throughput_mean_out_tok_per_s": 10.81,
+  "throughput_mean_total_tok_per_s": 97.29,
+  "wall_time_mean_s": 1515.6,
+  "hbm_per_npu_mb": [
+    3398,
+    3398,
+    3404,
+    3398,
+    3404,
+    3398,
+    3398,
+    3398
+  ],
+  "note": "output_tokens_per_s is undercounted by ~2x due to vLLM SSE multi-token chunks; actual throughput ~21.6 tok/s (1024 tok / 47s)",
+  "runs": {
+    "run_1": {
+      "case_id": "baseline_c1_run1",
+      "wall_time_s": 1522.808,
+      "ttft_ms": {
+        "p50": 355.51,
+        "p90": 360.11,
+        "p99": 364.15,
+        "mean": 344.91
+      },
+      "tpot_ms": {
+        "p50": 92.07,
+        "p90": 94.05,
+        "p99": 98.59,
+        "mean": 92.41
+      },
+      "e2e_ms": {
+        "p50": 47423.92,
+        "p99": 50738.3
+      },
+      "output_tokens_per_s": 10.76,
+      "avg_output_tokens_per_request": 512.1
+    },
+    "run_2": {
+      "case_id": "baseline_c1_run2",
+      "wall_time_s": 1512.555,
+      "ttft_ms": {
+        "p50": 354.03,
+        "p90": 363.31,
+        "p99": 382.81,
+        "mean": 348.5
+      },
+      "tpot_ms": {
+        "p50": 91.83,
+        "p90": 93.14,
+        "p99": 95.52,
+        "mean": 91.79
+      },
+      "e2e_ms": {
+        "p50": 47275.68,
+        "p99": 49165.37
+      },
+      "output_tokens_per_s": 10.83,
+      "avg_output_tokens_per_request": 512.1
+    },
+    "run_3": {
+      "case_id": "baseline_c1_run3",
+      "wall_time_s": 1511.471,
+      "ttft_ms": {
+        "p50": 355.32,
+        "p90": 358.65,
+        "p99": 362.84,
+        "mean": 349.45
+      },
+      "tpot_ms": {
+        "p50": 91.72,
+        "p90": 93.97,
+        "p99": 94.42,
+        "mean": 91.73
+      },
+      "e2e_ms": {
+        "p50": 47223.68,
+        "p99": 48602.88
+      },
+      "output_tokens_per_s": 10.84,
+      "avg_output_tokens_per_request": 512.0
+    }
+  }
+}

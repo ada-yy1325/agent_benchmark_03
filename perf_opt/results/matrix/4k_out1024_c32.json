@@ -1,0 +1,48 @@
+{
+  "case_id": "4k_out1024_c32",
+  "input_len": 4096,
+  "output_len": 1024,
+  "concurrency": 32,
+  "temperature": 0.0,
+  "ignore_eos": true,
+  "seed": 42,
+  "planned_requests": 128,
+  "successful_requests": 128,
+  "failed_requests": 0,
+  "wall_time_s": 251.227,
+  "total_input_tokens": 524288,
+  "total_output_tokens": 131072,
+  "output_tokens_per_s": 521.73,
+  "total_tokens_per_s": 2608.64,
+  "ttft_ms": {
+    "p50": 965.92,
+    "p90": 5926.96,
+    "p99": 8431.56,
+    "mean": 1915.93
+  },
+  "tpot_ms": {
+    "p50": 58.42,
+    "p90": 64.53,
+    "p99": 67.01,
+    "mean": 58.92
+  },
+  "e2e_ms": {
+    "p50": 61811.34,
+    "p99": 71041.53
+  },
+  "success_rate": 1.0,
+  "peak_hbm_mb_per_npu": [
+    3398,
+    3398,
+    3404,
+    3398,
+    3404,
+    3398,
+    3398,
+    3398
+  ],
+  "avg_output_tokens_per_request": 1024.0,
+  "fallback_to_text": false,
+  "timestamp": "2026-10-13T15:41:39.178724",
+  "errors": []
+}
