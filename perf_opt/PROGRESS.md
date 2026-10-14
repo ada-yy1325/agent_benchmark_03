@@ -35,9 +35,9 @@
 - ✅ NPU 显存采样 regex 已修复（npu-smi 的 HBM 行无 "MB" 后缀）
 
 ## 阶段 2 · 预填充调度优化（最高优先）
-- [ ] 2.0 测量核实（显存/拓扑/MTP）   产物：env/recheck.json
-- [ ] 2.1 chunked prefill 状态      产物：results/sched/chunk_status.md
-- [ ] 2.2 扫 max-num-batched-tokens  产物：results/sched/bat_<val>/
+- [x] 2.0 测量核实（显存/拓扑/MTP）   产物：env/recheck.json
+- [x] 2.1 chunked prefill 状态      产物：results/sched/chunk_status.md
+- [x] 2.2 扫 max-num-batched-tokens  产物：results/sched/bat_scan/ (8/8, 最优=8192, 即是基线)
 - [ ] 2.3 扫 max-num-seqs           产物：results/sched/seqs_<val>/
 - [ ] 2.4 组合验证 c=32/48/64       产物：results/sched/final_*.json
 - [ ] 2.5 调度最优配置小结          产物：summary/sched_best.json
