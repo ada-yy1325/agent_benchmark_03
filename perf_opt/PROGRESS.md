@@ -40,7 +40,7 @@
 - [x] 2.2 扫 max-num-batched-tokens  产物：results/sched/bat_scan/ (8/8, 最优=8192, 即是基线)
 - [x] 2.3 扫 max-num-seqs           产物：results/sched/seqs_scan/ (8/8, 最优=64→TTFT 2.5s, 25× ↑)
 - [x] 2.4 组合验证 c=32/48/64       产物：results/sched/final/ (c32=957ms, c48=12.6s, c64=13.9s; prefill瓶颈确认)
-- [ ] 2.5 调度最优配置小结          产物：summary/sched_best.json
+- [x] 2.5 调度最优配置小结          产物：summary/sched_best.json
 
 ## 阶段 3 · 并行拓扑（用满 16 卡）
 - [ ] 3.1 确认卡数/拓扑/DP 支持
