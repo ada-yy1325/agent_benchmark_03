@@ -74,7 +74,7 @@ def run_bench(max_seqs, cid, inp, out, conc, nreq):
     label = f"seqs{max_seqs}_{cid}"
     out_json = OUT_DIR / f"{label}.json"
     npu_csv = OUT_DIR / f"{label}_npu.csv"
-    case_id = f"bat{batched}_{cid}"
+    case_id = f"seqs{max_seqs}_{cid}"
     cmd = [
         "/opt/mamba/bin/python3", str(BENCH),
         "--base-url", BASE_URL, "--served-name", SERVED,
