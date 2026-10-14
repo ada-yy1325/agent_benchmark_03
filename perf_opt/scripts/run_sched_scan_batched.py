@@ -3,7 +3,7 @@
 Phase 2.2: Scan --max-num-batched-tokens.
 For each value: restart server, run c32_4k + c64_4k, save results.
 """
-import subprocess, time, json, sys, os
+import subprocess, time, json, os, urllib.request
 from pathlib import Path
 
 BENCH = Path(__file__).resolve().parent / "bench_serving.py"
@@ -15,9 +15,11 @@ HEALTH_URL = "http://127.0.0.1:8000/health"
 
 CONTROL_POINTS = [
     ("c32_4k", 4096, 1024, 32, 128),
+    ("c64_4k", 4096, 1024, 64, 128),
+]
+
 def health_ok():
     try:
-        import urllib.request
         req = urllib.request.urlopen(HEALTH_URL, timeout=5)
         return req.status == 200
     except:
@@ -43,16 +45,15 @@ def kill_server():
 def start_server(batched_tokens):
     name = f"sched_bat{batched_tokens}"
     os.system(f"tmux kill-session -t {name} 2>/dev/null")
+    workdir = str(Path(__file__).resolve().parent.parent)
     script = str(Path(__file__).resolve().parent / "start_server_param.py")
-    cmd = (
-        f"tmux new-session -d -s {name} "
-        f"'cd /inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/perf_opt && "
-        f"python3 {script} --batched {batched_tokens} --port 8000 --max-seqs 32 2>&1'"
-    )
+    # Use bash -c to handle the long command safely
+    inner = f"cd {workdir} && /opt/mamba/bin/python3 {script} --batched {batched_tokens} --port 8000 --max-seqs 32"
+    cmd = f"tmux new-session -d -s {name} bash -c '{inner} 2>&1'"
     print(f"  [START] tmux:{name} batched={batched_tokens}", flush=True)
     os.system(cmd)
     time.sleep(5)
-    ("c64_4k", 4096, 1024, 64, 128),
+
 def run_bench(batched, cid, inp, out, conc, nreq):
     label = f"bat{batched}_{cid}"
     out_json = OUT_DIR / f"{label}.json"
@@ -107,15 +108,13 @@ def main():
                 print(f"  [{cid}] FAIL", flush=True)
         all_results.append({"batched_tokens": bv, "results": res})
     
-    # Save + print table
     with open(OUT_DIR / "_summary.json", "w") as f:
         json.dump(all_results, f, indent=2)
     
-    print(f"\n{'='*50}", flush=True)
-    print(f"  SUMMARY TABLE", flush=True)
+    print(f"\n{'='*50}\n  SUMMARY TABLE", flush=True)
     hdr = f"  {'batched':>8} | {'c32 TTFT':>10} | {'c32 TP':>8} | {'c64 TTFT':>10} | {'c64 TP':>8}"
-    print(hdr, flush=True)
-    print(f"  {'-'*55}", flush=True)
+    print(hdr)
+    print(f"  {'-'*55}")
     for e in all_results:
         b = e["batched_tokens"]
         c32 = e["results"].get(f"bat{b}_c32_4k", {})
@@ -124,9 +123,8 @@ def main():
         c32p = f"{c32['tp']:.1f}" if c32.get('success') else "-"
         c64t = f"{c64['ttft_p50']:.0f}ms" if c64.get('success') else "FAIL"
         c64p = f"{c64['tp']:.1f}" if c64.get('success') else "-"
-        print(f"  {b:>8} | {c32t:>10} | {c32p:>8} | {c64t:>10} | {c64p:>8}", flush=True)
-    print("  DONE.", flush=True)
+        print(f"  {b:>8} | {c32t:>10} | {c32p:>8} | {c64t:>10} | {c64p:>8}")
+    print("  DONE.")
 
 if __name__ == "__main__":
     main()
-]
