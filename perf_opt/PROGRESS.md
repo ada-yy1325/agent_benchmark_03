@@ -21,13 +21,13 @@
   - 📝 完整 Phase 0 报告已写入 logbook.md 顶部（2026-10-13），含环境差异、所有 bug 修复过程、基线数据、经验教训
 
 ## 阶段 1 · 性能画像
-- [ ] 1.1 矩阵规划（先跑 4K 档）产物：summary/matrix_plan（写在 findings.md 顶部）
-- [ ] 1.2 4K 档逐点压测        产物：results/matrix/4k_out1024_c*.json（成功的跳过）
-- [ ] 1.3 2K 档逐点压测        产物：results/matrix/2k_out1024_c*.json
-- [ ] 1.4 8K 档逐点压测        产物：results/matrix/8k_out1024_c*.json
-- [ ] 1.5 矩阵汇总             产物：summary/matrix_summary.{json,csv}
-- [ ] 1.6 分析+findings        产物：summary/findings.md（甜蜜点/劣化点/瓶颈）
-- [ ] 1.7 git 提交+收尾        产物：git commit，更新 PROGRESS
+- [x] 1.1 矩阵规划（先跑 4K 档）产物：summary/matrix_plan（写在 findings.md 顶部）
+- [x] 1.2 4K 档逐点压测 ✅       产物：results/matrix/4k_out1024_c*.json（7/7 全成功）
+- [x] 1.3 2K 档逐点压测 ✅       产物：results/matrix/2k_out1024_c*.json（7/7 全成功）
+- [x] 1.4 8K 档逐点压测 ✅       产物：results/matrix/8k_out1024_c*.json（6/6 全成功，~23 min）
+- [x] 1.5 矩阵汇总 ✅           产物：summary/matrix_summary.{json,csv}（20 case，三档全量）
+- [ ] 1.6 分析+findings 🔄       产物：findings.md（8K 数据已填入，三档横向对比完成，待收尾 git）
+- [ ] 1.7 git 提交+收尾           产物：git commit，更新 logbook/PROGRESS
 
 ## 已知问题
 - 🔴 远程 GitHub 不可达 → 使用 base64+gzip 分片同步文件到远程

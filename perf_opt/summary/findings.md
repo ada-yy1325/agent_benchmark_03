@@ -11,8 +11,8 @@
 | 输入档 | 并发梯度 | 每点请求数 | 优先级 | 预计耗时 |
 |:------:|:--------|:----------|:------:|:--------|
 | **4K**（4096） | 1, 2, 4, 8, 16, 32, 64 | 4→8→16→32→64→128→128 | ⭐ 最优先 | ✅ 已完成（~25 min） |
-| 2K（2048） | 1, 2, 4, 8, 16, 32, 64 | 4→8→16→32→64→128→128 | 其次 | ~15-25 min |
-| 8K（8192） | 1, 2, 4, 8, 16, 32 | 4→8→16→32→64→128 | 最后 | ~40-60 min |
+| 2K（2048） | 1, 2, 4, 8, 16, 32, 64 | 4→8→16→32→64→128→128 | 其次 | ✅ 已完成（~25 min） |
+| 8K（8192） | 1, 2, 4, 8, 16, 32 | 4→8→16→32→64→128 | 最后 | ✅ 已完成（~23 min） |
 
 ### 执行顺序
 1. **1.1 规划** ← 本文
@@ -136,38 +136,127 @@ c=32 后饱和，prefill 阻塞 decode，形成瓶颈回路。
 
 ---
 
-## 8K 档结果（步骤 1.4）
+## 8K 档结果（步骤 1.4）✅ 完成
 
-*待填充*
+**时间**：2026-10-14 10:02 → 10:25（~23 min）
+
+### 核心数据表
+
+| case | c | req | ok | wall(s) | out_tok/s | TTFT p50 | TTFT p99 | TPOT p50 | E2E p50 |
+|:-----|:--:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| 8k_c1 | 1 | 4 | 4 | 206 | 20.8 | 608ms | 612ms | 47.6ms | 49.3s |
+| 8k_c2 | 2 | 8 | 8 | 207 | 41.2 | 731ms | 917ms | 47.8ms | 49.0s |
+| 8k_c4 | 4 | 16 | 16 | 206 | 82.8 | 828ms | 1,310ms | 46.0ms | 48.8s |
+| 8k_c8 | 8 | 32 | 32 | 228 | 148.9 | 1,247ms | 2,628ms | 51.2ms | 54.0s |
+| 8k_c16 | 16 | 64 | 64 | 258 | 262.8 | 1,364ms | 4,958ms | 57.5ms | 60.1s |
+| 8k_c32 | 32 | 128 | 128 | 304 | 443.7 | 1,769ms | 5,467ms | 67.7ms | 69.1s |
+
+> HBM：稳定 ~3.4 GB/NPU，无变化。显存不是瓶颈。
+
+### 关键发现
+
+#### ✅ 100% 成功率（6/6）
+8K 全量通过，延续 2K/4K 的稳定性记录。vLLM-Ascend 长输入下零 OOM。
+
+#### 🔴 Prefill 仍是天花板，但 8K c=32 比想象中好
+- c=32 的 TTFT p50 = **1,769ms**，仍然 < 2s
+- c=8→16：TTFT 仅从 1,247ms → 1,364ms（+9%），prefill 队列尚未爆炸
+- 8K 未测 c=64（因 max-num-seqs=32），但从趋势看 c=32→64 的 TTFT 也会爆炸
+
+#### 🟢 TPOT 轻度劣化
+- c=1→32：TPOT 从 47.6ms → 67.7ms（+42%），比 4K（+29%）略差
+- 根因：更长的 KV cache 导致 decode attention 内存带宽压力增大
+
+#### 🍰 甜点：c=16（交互）/ c=32（吞吐）
+| 场景 | 推荐 c | out_tok/s | TTFT p50 | 理由 |
+|:-----|:---:|:---:|:---:|:-----|
+| 长文交互式 | 16 | 263 | 1.36s | TTFT < 1.5s，体验可接受 |
+| 长文吞吐优先 | 32 | 444 | 1.77s | 吞吐峰值，TTFT 仍 < 2s |
 
 ---
 
-## 汇总分析（步骤 1.5–1.6）
+## 三档横向对比 + 瓶颈根因分析（步骤 1.5–1.6）
 
-*待填充*
+*数据已完成，见下方完整分析*
 
-### 各档甜点/劣化
+### Throughput Comparison (out_tok/s)
 
-| 输入档 | 甜蜜点并发 | 峰值 out_tok/s | 劣化点并发 | 劣化原因初判 |
-|:------:|:--------:|:--------------:|:--------:|:-----------|
-| 4K | c=32（TTFT<1s）/ c=8（交互） | 521.7 @c=32 | c=64（TTFT 62s） | Prefill 排队瓶颈 |
-| 2K | c=32（TTFT 0.8s）/ c=8（交互） | 554.1 @c=32 | c=64（TTFT 59s） | 同 4K，prefill 瓶颈 |
-| 8K | *待测* | *待测* | *待测* | *待测* |
+| c | 2K | 4K | 8K | 4K->8K |
+|:--:|:--:|:--:|:--:|:--:|
+| 1 | 21.6 | 21.9 | 20.8 | -5% |
+| 4 | 88.3 | 87.8 | 82.8 | -6% |
+| 8 | 163.7 | 160.1 | 148.9 | -7% |
+| 16 | 302.9 | 291.6 | 262.8 | -10% |
+| 32 | 554.1 | 521.7 | 443.7 | -15% |
 
-### 瓶颈判断框架（按档回答）
+- 8K throughput 6-15% lower than 4K, gap widens with concurrency
+- Global peak: 2K c=32 **554 tok/s**
 
-#### 4K 档
-1. **TTFT 是否随并发显著恶化？** → ✅ 是。c=1→32 从 355ms 缓升至 966ms（可接受），但 c=64 暴增至 **62s**。Prefill 排队呈超线性劣化。
-2. **TPOT 是否随并发线性增长？** → ❌ 否。TPOT 极稳定（45→58ms），decode 不是瓶颈。
-3. **HBM 峰值是否接近 64GB？** → ❌ 否。仅 3.4 GB/NPU，远未触顶。显存充足。
-4. **成功率为 100% 的最高并发是多少？** → **c=64**（全成功），vLLM-Ascend 鲁棒性优秀。
-5. **out_tok/s 是否随并发线性增长？** → c≤4 线性，c=4→32 亚线性（效率 74%），c=32→64 **饱和**（0.7% 增量）。Prefill 阻塞成为吞吐天花板。
+### TTFT Comparison (ms, lower is better)
+
+| c | 2K | 4K | 8K | 8K/2K | 8K/4K |
+|:--:|:--:|:--:|:--:|:--:|:--:|
+| 1 | 245 | 355 | 608 | 2.5x | 1.7x |
+| 8 | 429 | 658 | 1247 | 2.9x | 1.9x |
+| 16 | 473 | 718 | 1364 | 2.9x | 1.9x |
+| 32 | 776 | 966 | 1770 | 2.3x | 1.8x |
+
+- 8K TTFT is 2.3-2.9x of 2K, superlinear O(N^2) prefill
+- Input doubled, TTFT grows 1.7-1.9x
+
+### TPOT Comparison (ms, lower is better)
+
+| c | 2K | 4K | 8K |
+|:--:|:--:|:--:|:--:|
+| 1 | 45.9 | 45.4 | 47.6 |
+| 8 | 47.5 | 47.9 | 51.2 |
+| 16 | 51.2 | 52.8 | 57.5 |
+| 32 | 55.8 | 58.4 | 67.7 |
+
+- Low concurrency TPOT ~46ms, c=32 8K degrades 21%
+- Longer KV cache = more decode attention bandwidth pressure
+
+### Sweet Spot Matrix (All 3 Tiers)
+
+| Tier | Scenario | c | TTFT | out_tok/s | Use Case |
+|:---:|:-----|:---:|:---:|:---:|:-----|
+| 2K | Interactive | 8 | 0.43s | 164 | Quick chat |
+| | Throughput | 32 | 0.78s | **554** | Batch short |
+| 4K | Interactive | 8 | 0.66s | 160 | Normal chat |
+| | Throughput | 32 | 0.97s | 522 | Batch medium |
+| 8K | Interactive | 16 | 1.36s | 263 | Long summary |
+| | Throughput | 32 | 1.77s | 444 | Long batch |
+
+### Bottleneck Root Cause (All Tiers)
+
+1. **Prefill is #1 bottleneck** -- c=64 TTFT explodes to ~60s, NPU prefill O(N^2) is compute-heavy
+2. **Decode is NOT a bottleneck** -- TPOT 46->68ms (+48%), stable
+3. **HBM VRAM is NOT a bottleneck** -- only ~3.4 GB/NPU (5.3%), far from 64GB
+4. **Concurrency cap: ~32** -- usable across all tiers, c=64 succeeds but TTFT unusable
+
+### Global Summary
+
+| Metric | Best Value | Location |
+|:-----|:---:|:-----|
+| Peak throughput | 554 tok/s | 2K c=32 |
+| Lowest TTFT | 245ms | 2K c=1 |
+| Lowest TPOT | 44.1ms | 2K c=4 |
+| Max usable concurrency | 32 | All tiers |
+| Success rate | **100% (20/20)** | All tiers |
+
+**Core conclusion**: vLLM-Ascend + DeepSeek-V4-Flash-W8A8 on 16x910B2C: stability 100%.
+Bottleneck = Prefill. Concurrency <=32 safe. Short inputs preferred.
+
 
 ---
 
 ## 本阶段未覆盖/受限项
 
-*待填充*
+- **8K c=64 未测**：受 max-num-seqs=32 限制，无法测试 8K c=64 的 TTFT 爆炸点
+- **TPOT P99 未完整记录**：4K/8K 档的部分 P99 数据不完整
+- **NPU 算力利用率**：npu-smi CSV 记录了 HBM，但未记录 NPU 算力利用率（aicore %）
+- **长文本极限**：未测试 16K/32K/128K 输入，当前最大仅 8K
+- **持续时间测试**：所有测试仅 2-5 分钟，未验证长期运行的稳定性/内存泄漏
 ## 阶段 0 基线 — 冒烟测试结果（步骤 0.3）
 
 **时间**：2026-10-10
