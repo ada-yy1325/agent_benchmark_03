@@ -88,13 +88,9 @@ def _patched_run_engine_core(*args, dp_rank=0, local_dp_rank=0, **kwargs):
 _engine_core.EngineCoreProc.run_engine_core = _patched_run_engine_core
 print(f"[launcher] Monkey-patched EngineCoreProc.run_engine_core: ASCEND_RT_VISIBLE_DEVICES", flush=True)
 
-# ── Monkey-patch 3: file-based barrier for NPU RawDriver init ──
-# NPU RawDriver opens physical device 0 during first set_device call.
-# HCCL init (_init_worker_distributed_environment) happens inside _init_device,
-# so we can't barrier after _init_device returns. Instead, we patch
-# _init_worker_distributed_environment itself: increment a shared counter
-# after set_device but before HCCL init. Only when all WORLD workers have
-# reported does any worker proceed to HCCL.
+# ── Monkey-patch 3: device mapping + barrier before HCCL ──
+# Problem 1: NPU device assignment must use global device ID (dp*tp+local)
+# Problem 2: NPU RawDriver needs device 0; HCCL locks it. Barrier sync.
 import fcntl as _fcntl
 import time as _time
 
@@ -110,39 +106,67 @@ if __name__ == '__main__':
         _f.write("0\n")
     print(f"[launcher] Created sync file {_SYNC_FILE}", flush=True)
 
-def _sync_counter_increment():
-    """Atomically increment counter; return new count."""
-    with open(_SYNC_FILE, "r+") as _f:
-        _fcntl.flock(_f, _fcntl.LOCK_EX)
-        content = _f.read().strip()
-        count = int(content) if content else 0
-        if count < WORLD:
-            count += 1
-            _f.seek(0)
-            _f.write(f"{count}\n")
-            _f.truncate()
-        _fcntl.flock(_f, _fcntl.LOCK_UN)
-        return count
-
-import vllm_ascend.worker.worker as _ascend_worker
-_orig_init_distributed = _ascend_worker.NPUWorker._init_worker_distributed_environment
-
-def _patched_init_distributed(self):
-    pid = _os.getpid()
+def _sync_barrier(pid):
+    """File-based barrier: increment counter, wait until WORLD reached."""
     print(f"[BARRIER] PID={pid} device ready, waiting for all {WORLD} workers...", flush=True)
-    # Wait until all workers have finished their set_device (RawDriver init)
     done = False
     while not done:
         try:
-            count = _sync_counter_increment()
-            print(f"[BARRIER] PID={pid} count={count}/{WORLD}", flush=True)
-            if count >= WORLD:
-                done = True
+            with open(_SYNC_FILE, "r+") as _f:
+                _fcntl.flock(_f, _fcntl.LOCK_EX)
+                content = _f.read().strip()
+                count = int(content) if content else 0
+                if count < WORLD:
+                    count += 1
+                    _f.seek(0)
+                    _f.write(f"{count}\n")
+                    _f.truncate()
+                _fcntl.flock(_f, _fcntl.LOCK_UN)
+                print(f"[BARRIER] PID={pid} count={count}/{WORLD}", flush=True)
+                if count >= WORLD:
+                    done = True
         except (ValueError, FileNotFoundError) as e:
             print(f"[BARRIER] PID={pid} sync error: {e}", flush=True)
         if not done:
             _time.sleep(0.5)
     print(f"[BARRIER] PID={pid} proceeding to HCCL init (count={count})", flush=True)
+
+import vllm_ascend.worker.worker as _ascend_worker
+
+# Patch _init_device: map device ID + barrier before HCCL
+_orig_init_device = _ascend_worker.NPUWorker._init_device
+
+def _patched_init_device(self):
+    saved_local_rank = self.local_rank
+    # Compute NPU device: DP group offset + local TP rank
+    try:
+        dp_rank = self.vllm_config.parallel_config.data_parallel_rank
+    except Exception:
+        dp_rank = getattr(self.vllm_config.parallel_config, 'data_parallel_rank', 0)
+    tp_size = self.vllm_config.parallel_config.tensor_parallel_size
+    device_id = dp_rank * tp_size + saved_local_rank
+    self.local_rank = device_id
+    pid = _os.getpid()
+    print(f"[DEV_MAP] PID={pid} dp={dp_rank} tp={tp_size} local={saved_local_rank} → NPU{device_id}", flush=True)
+    
+    # Call original _init_device with mapped device (set_device + HCCL init inside)
+    # BUT: HCCL init locks device 0, so we need to sync before that.
+    # Actually, _init_device calls _init_worker_distributed_environment (HCCL).
+    # We'll patch that method separately.
+    try:
+        return _orig_init_device(self)
+    finally:
+        self.local_rank = saved_local_rank
+
+_ascend_worker.NPUWorker._init_device = _patched_init_device
+print(f"[launcher] Monkey-patched _init_device: device=dp*tp+local", flush=True)
+
+# Patch _init_worker_distributed_environment for barrier before HCCL
+_orig_init_distributed = _ascend_worker.NPUWorker._init_worker_distributed_environment
+
+def _patched_init_distributed(self):
+    pid = _os.getpid()
+    _sync_barrier(pid)
     return _orig_init_distributed(self)
 
 _ascend_worker.NPUWorker._init_worker_distributed_environment = _patched_init_distributed
