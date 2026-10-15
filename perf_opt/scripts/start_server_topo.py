@@ -42,32 +42,23 @@ print(f"[launcher] TP={TP}, DP={DP}, WORLD={WORLD}, batched={BATCHED}, max_seqs=
 # ── Monkey-patch 1: fix single-node data-parallel HCCL rank offset ──
 # In vllm v1, MultiprocExecutor computes global_start_rank as:
 #   global_start_rank = local_world_size * parallel_config.node_rank_within_dp
-# node_rank_within_dp = node_rank % nnodes_within_dp, and nnodes_within_dp
-# returns 1 when nnodes==1, so both DP groups get global_start_rank=0.
-# Fix: set nnodes=2, node_rank=dp_rank so node_rank_within_dp=dp_rank,
-# giving DP1 global_start_rank=TP=8 (workers get rank 8-15 for HCCL).
-import vllm.v1.engine.core as _engine_core
-_orig_run_engine_core = _engine_core.EngineCoreProc.run_engine_core
+# node_rank_within_dp = node_rank % nnodes_within_dp.
+# On a single node (nnodes=1), node_rank_within_dp is always 0 for all DP
+# groups, so DP1 workers get rank=0..TP-1 (same as DP0), causing HCCL rank
+# collision and device conflict.
+# Fix: override node_rank_within_dp to return data_parallel_rank_local for
+# single-node multi-DP, so DP1 gets global_start_rank=TP=8.
+import vllm.config.parallel as _vllm_parallel
+_orig_nrodp = _vllm_parallel.ParallelConfig.node_rank_within_dp
 
-def _patched_run_engine_core(*args, dp_rank=0, local_dp_rank=0, **kwargs):
-    vllm_config = kwargs.get("vllm_config")
-    if vllm_config is not None and dp_rank > 0:
-        pc = vllm_config.parallel_config
-        if pc.data_parallel_size > 1:
-            old_nnodes = pc.nnodes
-            old_node_rank = pc.node_rank
-            old_dp_size_local = pc.data_parallel_size_local
-            pc.nnodes = max(pc.nnodes, pc.data_parallel_size)
-            pc.node_rank = dp_rank
-            pc.data_parallel_size_local = pc.data_parallel_size
-            print(f"[DP_FIX] dp_rank={dp_rank} "
-                  f"nnodes {old_nnodes}→{pc.nnodes} "
-                  f"node_rank {old_node_rank}→{pc.node_rank} "
-                  f"dp_size_local {old_dp_size_local}→{pc.data_parallel_size_local}", flush=True)
-    return _orig_run_engine_core(*args, dp_rank=dp_rank, local_dp_rank=local_dp_rank, **kwargs)
+def _new_nrodp(self) -> int:
+    if self.nnodes == 1 and self.data_parallel_size > 1:
+        # Single-node multi-DP: use data_parallel_rank_local for offset
+        return self.data_parallel_rank_local
+    return _orig_nrodp.fget(self)
 
-_engine_core.EngineCoreProc.run_engine_core = _patched_run_engine_core
-print(f"[launcher] Monkey-patched EngineCoreProc.run_engine_core: nnodes+node_rank for DP", flush=True)
+_vllm_parallel.ParallelConfig.node_rank_within_dp = property(_new_nrodp)
+print(f"[launcher] Monkey-patched node_rank_within_dp: data_parallel_rank_local for DP", flush=True)
 
 # ── Monkey-patch 2: fix single-node data-parallel NPU device assignment ──
 # In vllm-ascend, NPUWorker._init_device selects device via self.local_rank (0..TP-1).
