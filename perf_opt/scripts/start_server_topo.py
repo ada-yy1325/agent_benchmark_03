@@ -62,10 +62,11 @@ print(f"[launcher] Monkey-patched node_rank_within_dp: data_parallel_rank_local 
 
 # ── Monkey-patch 2: partition NPU devices via ASCEND_RT_VISIBLE_DEVICES ──
 # On NPU, setting ASCEND_RT_VISIBLE_DEVICES per DP group restricts each
-# EngineCore+workers to only its own device range, solving:
-#   1. Device assignment: local_rank 0-7 maps to correct physical NPU
-#   2. Driver init: each DP group has its own "device 0", no conflict
-# Approach: intercept EngineCoreProc.run_engine_core and set env var.
+# EngineCore+workers to only its own device range, solving device assignment.
+# However, the NPU RawDriver always opens physical device 0 during init,
+# so we also need a barrier to ensure ALL workers finish set_device before
+# ANY worker starts HCCL init (which locks device 0).
+# Approach: intercept EngineCoreProc.run_engine_core to set env var + barrier.
 import os as _os
 import vllm.v1.engine.core as _engine_core
 _orig_run_engine_core = _engine_core.EngineCoreProc.run_engine_core
@@ -86,6 +87,69 @@ def _patched_run_engine_core(*args, dp_rank=0, local_dp_rank=0, **kwargs):
 
 _engine_core.EngineCoreProc.run_engine_core = _patched_run_engine_core
 print(f"[launcher] Monkey-patched EngineCoreProc.run_engine_core: ASCEND_RT_VISIBLE_DEVICES", flush=True)
+
+# ── Monkey-patch 3: file-based barrier for NPU RawDriver init ──
+# NPU RawDriver opens physical device 0 during first set_device call.
+# If HCCL init (DP0) holds device 0 before DP1 workers finish set_device,
+# DP1's RawDriver init fails. Fix: file-based counter sync.
+# Counter is created by the main (API server) process; worker processes
+# increment the counter after set_device and wait until WORLD workers
+# have reported before returning from _init_device (HCCL init follows).
+import fcntl as _fcntl
+import time as _time
+
+_SYNC_FILE = "/tmp/dp2tp8_sync.lock"
+
+# ── Main process: create fresh sync file ──
+# Worker processes (spawned) also import this module, but __name__ will be
+# '__mp_main__' in spawn mode, so they skip file creation.
+if __name__ == '__main__':
+    try:
+        _os.remove(_SYNC_FILE)
+    except FileNotFoundError:
+        pass
+    with open(_SYNC_FILE, "w") as _f:
+        _f.write("0\n")
+    print(f"[launcher] Created sync file {_SYNC_FILE}", flush=True)
+
+def _sync_counter_increment():
+    """Atomically read and increment counter; return (old_count, new_count)."""
+    with open(_SYNC_FILE, "r+") as _f:
+        _fcntl.flock(_f, _fcntl.LOCK_EX)
+        content = _f.read().strip()
+        count = int(content) if content else 0
+        if count < WORLD:
+            count += 1
+            _f.seek(0)
+            _f.write(f"{count}\n")
+            _f.truncate()
+        _fcntl.flock(_f, _fcntl.LOCK_UN)
+        return count
+
+import vllm_ascend.worker.worker as _ascend_worker
+_orig_init_device = _ascend_worker.NPUWorker._init_device
+
+def _patched_init_device(self):
+    ret = _orig_init_device(self)  # set_device, which triggers RawDriver init
+    # After set_device, use file-based counter to wait for all workers
+    pid = _os.getpid()
+    print(f"[BARRIER] PID={pid} device done, waiting for all {WORLD} workers...", flush=True)
+    done = False
+    while not done:
+        try:
+            count = _sync_counter_increment()
+            print(f"[BARRIER] PID={pid} count={count}/{WORLD}", flush=True)
+            if count >= WORLD:
+                done = True
+        except (ValueError, FileNotFoundError) as e:
+            print(f"[BARRIER] PID={pid} sync error: {e}", flush=True)
+        if not done:
+            _time.sleep(0.5)
+    print(f"[BARRIER] PID={pid} proceeding to HCCL init (count={count})", flush=True)
+    return ret
+
+_ascend_worker.NPUWorker._init_device = _patched_init_device
+print(f"[launcher] Monkey-patched NPUWorker._init_device: file-barrier after set_device", flush=True)
 
 MODEL_DIR = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-self"
 
