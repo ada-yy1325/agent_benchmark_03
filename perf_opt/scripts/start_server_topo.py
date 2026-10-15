@@ -56,10 +56,14 @@ def _patched_run_engine_core(*args, dp_rank=0, local_dp_rank=0, **kwargs):
         if pc.data_parallel_size > 1:
             old_nnodes = pc.nnodes
             old_node_rank = pc.node_rank
+            old_dp_size_local = pc.data_parallel_size_local
             pc.nnodes = max(pc.nnodes, pc.data_parallel_size)
             pc.node_rank = dp_rank
-            print(f"[DP_FIX] dp_rank={dp_rank} nnodes {old_nnodes}→{pc.nnodes} "
-                  f"node_rank {old_node_rank}→{pc.node_rank}", flush=True)
+            pc.data_parallel_size_local = pc.data_parallel_size
+            print(f"[DP_FIX] dp_rank={dp_rank} "
+                  f"nnodes {old_nnodes}→{pc.nnodes} "
+                  f"node_rank {old_node_rank}→{pc.node_rank} "
+                  f"dp_size_local {old_dp_size_local}→{pc.data_parallel_size_local}", flush=True)
     return _orig_run_engine_core(*args, dp_rank=dp_rank, local_dp_rank=local_dp_rank, **kwargs)
 
 _engine_core.EngineCoreProc.run_engine_core = _patched_run_engine_core
