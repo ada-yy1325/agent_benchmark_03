@@ -50,7 +50,10 @@ _orig_init_device = _ascend_worker.NPUWorker._init_device
 
 def _patched_init_device(self):
     saved_local_rank = self.local_rank
+    saved_rank = self.rank
     self.local_rank = self.rank  # Use global rank for NPU device selection
+    import os
+    print(f"[PATCH] PID={os.getpid()} orig_local_rank={saved_local_rank} orig_rank={saved_rank} -> new_local_rank={self.local_rank}", flush=True)
     try:
         return _orig_init_device(self)
     finally:
