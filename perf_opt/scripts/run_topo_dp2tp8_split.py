@@ -9,7 +9,8 @@ BENCH = Path(__file__).resolve().parent / "bench_serving.py"
 SERVED = "dsv4"
 MODEL_DIR = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-self"
 OUT_DIR = Path(__file__).resolve().parent.parent / "results" / "topo" / TOPO
-WORKDIR = str(Path(__file__).resolve().parent.parent)
+WORKDIR = str(Path(__file__).resolve().parent.parent.parent)  # project root
+START_SCRIPT = str(Path(__file__).resolve().parent / "start_server_isolated.py")
 
 import urllib.request
 
@@ -45,7 +46,7 @@ set -e
 export PATH=/opt/mamba/bin:$PATH
 export ASCEND_RT_VISIBLE_DEVICES={devices}
 cd {WORKDIR}
-exec python3 perf_opt/scripts/start_server_isolated.py --port {port} --batched {BATCHED} --max-seqs {MAX_SEQS} 2>&1 | tee {log_file}
+exec python3 {START_SCRIPT} --port {port} --batched {BATCHED} --max-seqs {MAX_SEQS} 2>&1 | tee {log_file}
 """)
     os.chmod(wrapper, 0o755)
     os.system(f"tmux new-session -d -s {name} bash {wrapper}")
