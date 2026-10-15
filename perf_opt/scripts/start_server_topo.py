@@ -39,13 +39,37 @@ PORT = args_cmd.port
 WORLD = TP * DP
 print(f"[launcher] TP={TP}, DP={DP}, WORLD={WORLD}, batched={BATCHED}, max_seqs={MAX_SEQS}, port={PORT}", flush=True)
 
-# ── Monkey-patch: fix single-node data-parallel NPU device assignment ──
+# ── Monkey-patch 1: fix single-node data-parallel HCCL rank offset ──
+# In vllm v1, MultiprocExecutor computes global_start_rank as:
+#   global_start_rank = local_world_size * parallel_config.node_rank_within_dp
+# node_rank_within_dp = node_rank % nnodes_within_dp, and nnodes_within_dp
+# returns 1 when nnodes==1, so both DP groups get global_start_rank=0.
+# Fix: set nnodes=2, node_rank=dp_rank so node_rank_within_dp=dp_rank,
+# giving DP1 global_start_rank=TP=8 (workers get rank 8-15 for HCCL).
+import vllm.v1.engine.core as _engine_core
+_orig_run_engine_core = _engine_core.EngineCoreProc.run_engine_core
+
+def _patched_run_engine_core(*args, dp_rank=0, local_dp_rank=0, **kwargs):
+    vllm_config = kwargs.get("vllm_config")
+    if vllm_config is not None and dp_rank > 0:
+        pc = vllm_config.parallel_config
+        if pc.data_parallel_size > 1:
+            old_nnodes = pc.nnodes
+            old_node_rank = pc.node_rank
+            pc.nnodes = max(pc.nnodes, pc.data_parallel_size)
+            pc.node_rank = dp_rank
+            print(f"[DP_FIX] dp_rank={dp_rank} nnodes {old_nnodes}→{pc.nnodes} "
+                  f"node_rank {old_node_rank}→{pc.node_rank}", flush=True)
+    return _orig_run_engine_core(*args, dp_rank=dp_rank, local_dp_rank=local_dp_rank, **kwargs)
+
+_engine_core.EngineCoreProc.run_engine_core = _patched_run_engine_core
+print(f"[launcher] Monkey-patched EngineCoreProc.run_engine_core: nnodes+node_rank for DP", flush=True)
+
+# ── Monkey-patch 2: fix single-node data-parallel NPU device assignment ──
 # In vllm-ascend, NPUWorker._init_device selects device via self.local_rank (0..TP-1).
-# On a single node with DP>1, both DP groups get local_rank 0..TP-1, causing:
-#   1. DP1 workers try to open already-used NPU 0..TP-1 → SetDevice error 507033
-#   2. Additionally, vllm's MultiprocExecutor uses node_rank_within_dp for global_start_rank,
-#      which is always 0 on single-node (property without setter), so DP1 workers also
-#      get rank=0..TP-1 instead of TP..TP+TP-1.
+# On a single node with DP>1, both DP groups get local_rank 0..TP-1, causing
+# DP1 workers to try opening already-used NPU 0..TP-1 → SetDevice error 507033.
+# Even with fixed HCCL ranks (patch 1), workers still use local_rank for set_device.
 # Fix: compute device ID from data_parallel_rank * tp_size + local_rank.
 # e.g. DP0→NPU 0-7, DP1→NPU 8-15 without relying on global_start_rank or rank.
 import vllm_ascend.worker.worker as _ascend_worker
