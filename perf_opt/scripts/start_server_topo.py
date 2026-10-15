@@ -88,31 +88,33 @@ def _patched_run_engine_core(*args, dp_rank=0, local_dp_rank=0, **kwargs):
 _engine_core.EngineCoreProc.run_engine_core = _patched_run_engine_core
 print(f"[launcher] Monkey-patched EngineCoreProc.run_engine_core: ASCEND_RT_VISIBLE_DEVICES", flush=True)
 
-# ── Monkey-patch 3: device mapping + barrier before HCCL ──
+# ── Monkey-patch 3: device mapping + dual barriers ──
 # Problem 1: NPU device assignment must use global device ID (dp*tp+local)
-# Problem 2: NPU RawDriver needs device 0; HCCL locks it. Barrier sync.
+# Problem 2: NPU RawDriver needs device 0; races if groups start at different times
+# Fix: two barriers:
+#   A) Before any NPU op: sync all 16 workers → start set_device together
+#   B) After set_device, before HCCL: sync all 16 → start HCCL together
 import fcntl as _fcntl
 import time as _time
 
-_SYNC_FILE = "/tmp/dp2tp8_sync.lock"
+_SYNC_FILE_A = "/tmp/dp2tp8_sync_a.lock"  # Barrier before set_device
+_SYNC_FILE_B = "/tmp/dp2tp8_sync_b.lock"  # Barrier before HCCL
 
-# ── Main process: create fresh sync file ──
+# ── Main process: create fresh sync files ──
 if __name__ == '__main__':
-    try:
-        _os.remove(_SYNC_FILE)
-    except FileNotFoundError:
-        pass
-    with open(_SYNC_FILE, "w") as _f:
-        _f.write("0\n")
-    print(f"[launcher] Created sync file {_SYNC_FILE}", flush=True)
+    for _sf in [_SYNC_FILE_A, _SYNC_FILE_B]:
+        try: _os.remove(_sf)
+        except FileNotFoundError: pass
+        with open(_sf, "w") as _f: _f.write("0\n")
+    print(f"[launcher] Created sync files A/B", flush=True)
 
-def _sync_barrier(pid):
+def _sync_barrier(sync_file, pid, label):
     """File-based barrier: increment counter, wait until WORLD reached."""
-    print(f"[BARRIER] PID={pid} device ready, waiting for all {WORLD} workers...", flush=True)
+    print(f"[BARRIER_{label}] PID={pid} waiting for {WORLD}...", flush=True)
     done = False
     while not done:
         try:
-            with open(_SYNC_FILE, "r+") as _f:
+            with open(sync_file, "r+") as _f:
                 _fcntl.flock(_f, _fcntl.LOCK_EX)
                 content = _f.read().strip()
                 count = int(content) if content else 0
@@ -122,23 +124,29 @@ def _sync_barrier(pid):
                     _f.write(f"{count}\n")
                     _f.truncate()
                 _fcntl.flock(_f, _fcntl.LOCK_UN)
-                print(f"[BARRIER] PID={pid} count={count}/{WORLD}", flush=True)
                 if count >= WORLD:
                     done = True
+                else:
+                    print(f"[BARRIER_{label}] PID={pid} {count}/{WORLD}", flush=True)
         except (ValueError, FileNotFoundError) as e:
-            print(f"[BARRIER] PID={pid} sync error: {e}", flush=True)
+            print(f"[BARRIER_{label}] PID={pid} error: {e}", flush=True)
         if not done:
             _time.sleep(0.5)
-    print(f"[BARRIER] PID={pid} proceeding to HCCL init (count={count})", flush=True)
+    print(f"[BARRIER_{label}] PID={pid} released", flush=True)
 
 import vllm_ascend.worker.worker as _ascend_worker
 
-# Patch _init_device: map device ID + barrier before HCCL
+# Patch _init_device: barrier A → map device → _orig_init_device → barrier B
 _orig_init_device = _ascend_worker.NPUWorker._init_device
 
 def _patched_init_device(self):
+    pid = _os.getpid()
+    
+    # Barrier A: wait for all 16 workers before touching NPU
+    _sync_barrier(_SYNC_FILE_A, pid, "A")
+    
+    # Now map device and call original _init_device
     saved_local_rank = self.local_rank
-    # Compute NPU device: DP group offset + local TP rank
     try:
         dp_rank = self.vllm_config.parallel_config.data_parallel_rank
     except Exception:
@@ -146,31 +154,26 @@ def _patched_init_device(self):
     tp_size = self.vllm_config.parallel_config.tensor_parallel_size
     device_id = dp_rank * tp_size + saved_local_rank
     self.local_rank = device_id
-    pid = _os.getpid()
     print(f"[DEV_MAP] PID={pid} dp={dp_rank} tp={tp_size} local={saved_local_rank} → NPU{device_id}", flush=True)
     
-    # Call original _init_device with mapped device (set_device + HCCL init inside)
-    # BUT: HCCL init locks device 0, so we need to sync before that.
-    # Actually, _init_device calls _init_worker_distributed_environment (HCCL).
-    # We'll patch that method separately.
     try:
-        return _orig_init_device(self)
+        return _orig_init_device(self)  # set_device → init_distributed (barrier B)
     finally:
         self.local_rank = saved_local_rank
 
 _ascend_worker.NPUWorker._init_device = _patched_init_device
-print(f"[launcher] Monkey-patched _init_device: device=dp*tp+local", flush=True)
+print(f"[launcher] Monkey-patched _init_device: barrier A + device map", flush=True)
 
-# Patch _init_worker_distributed_environment for barrier before HCCL
+# Patch _init_worker_distributed_environment for barrier B before HCCL
 _orig_init_distributed = _ascend_worker.NPUWorker._init_worker_distributed_environment
 
 def _patched_init_distributed(self):
     pid = _os.getpid()
-    _sync_barrier(pid)
+    _sync_barrier(_SYNC_FILE_B, pid, "B")
     return _orig_init_distributed(self)
 
 _ascend_worker.NPUWorker._init_worker_distributed_environment = _patched_init_distributed
-print(f"[launcher] Monkey-patched _init_worker_distributed_environment: barrier before HCCL", flush=True)
+print(f"[launcher] Monkey-patched _init_worker_distributed_environment: barrier B before HCCL", flush=True)
 
 MODEL_DIR = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-self"
 
