@@ -39,6 +39,26 @@ PORT = args_cmd.port
 WORLD = TP * DP
 print(f"[launcher] TP={TP}, DP={DP}, WORLD={WORLD}, batched={BATCHED}, max_seqs={MAX_SEQS}, port={PORT}", flush=True)
 
+# ── Monkey-patch: fix single-node data-parallel NPU device assignment ──
+# In vllm-ascend, NPUWorker._init_device uses self.local_rank for device selection.
+# For DP>1 on a single node, both DP groups get local_rank 0..TP-1 and both try
+# to use npu:0..npu:(TP-1), causing SetDevice error 507033 on DP1 workers.
+# Fix: use self.rank (global rank) instead of self.local_rank for device selection,
+# so DP1 workers use npu:TP..npu:(TP+TP-1) correctly.
+import vllm_ascend.worker.worker as _ascend_worker
+_orig_init_device = _ascend_worker.NPUWorker._init_device
+
+def _patched_init_device(self):
+    saved_local_rank = self.local_rank
+    self.local_rank = self.rank  # Use global rank for NPU device selection
+    try:
+        return _orig_init_device(self)
+    finally:
+        self.local_rank = saved_local_rank
+
+_ascend_worker.NPUWorker._init_device = _patched_init_device
+print(f"[launcher] Monkey-patched NPUWorker._init_device: device=rank (not local_rank)", flush=True)
+
 MODEL_DIR = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-self"
 
 CLI_ARGS = [
