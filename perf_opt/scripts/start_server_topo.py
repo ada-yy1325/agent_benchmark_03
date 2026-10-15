@@ -38,7 +38,6 @@ PORT = args_cmd.port
 
 WORLD = TP * DP
 print(f"[launcher] TP={TP}, DP={DP}, WORLD={WORLD}, batched={BATCHED}, max_seqs={MAX_SEQS}, port={PORT}", flush=True)
-assert WORLD == 16, f"TP*DP must equal 16 (got {WORLD})"
 
 MODEL_DIR = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-self"
 
