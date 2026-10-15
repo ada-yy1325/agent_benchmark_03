@@ -96,8 +96,8 @@ def main():
         print(f"\n  {'-'*50}")
         print(f"  >> c={c} ({idx+1}/{len(CONCURRENCIES)})", flush=True)
 
-        # Launch benchmark procs for both ports
-        procs = {}
+        # Launch both benchmarks in parallel, writing output to files (no pipes)
+        bench_procs = {}
         for port in PORTS:
             label = f"{TOPO}_port{port}_c{c}_{INP}k"
             cmd = [
@@ -114,57 +114,54 @@ def main():
                 "--npu-stats", str(OUT_DIR / f"{label}_npu.csv"),
                 "--temp", "0.0", "--seed", "1",
             ]
-            p = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE, text=True)
-            procs[port] = (p, label)
+            log_f = open(OUT_DIR / f"{label}_log.txt", "w")
+            p = subprocess.Popen(cmd, stdout=log_f, stderr=subprocess.STDOUT)
+            bench_procs[port] = (p, log_f, label)
 
-        # Wait for both in parallel via threads
-        import threading
-        port_results = []
-        lock = threading.Lock()
-
-        def wait_one(port, p, label):
+        # Wait for both to finish
+        t0 = time.time()
+        done = {}
+        for port, (p, log_f, label) in bench_procs.items():
             try:
-                stdout, stderr = p.communicate(timeout=7200)
-                if p.returncode != 0:
-                    err_file = OUT_DIR / f"{label}_err.txt"
-                    err_file.write_text(stderr)
-                    with lock:
-                        port_results.append({"port": port, "success": False,
-                                             "error": f"rc={p.returncode}", "stderr": stderr[:500]})
-                else:
-                    data = json.loads((OUT_DIR / f"{label}.json").read_text())
-                    with lock:
-                        port_results.append({
-                            "port": port,
-                            "ttft_p50": data["ttft_ms"]["p50"],
-                            "ttft_p99": data["ttft_ms"]["p99"],
-                            "tpot_p50": data["tpot_ms"]["p50"],
-                            "tp": data["output_tokens_per_s"],
-                            "ok": data["successful_requests"],
-                            "total": data["planned_requests"],
-                            "success": True,
-                        })
+                p.wait(timeout=7200)
+                done[port] = p.returncode
             except subprocess.TimeoutExpired:
                 p.kill()
-                p.communicate()
-                with lock:
-                    port_results.append({"port": port, "success": False,
-                                         "error": "timeout 7200s"})
-            except Exception as e:
-                with lock:
+                p.wait()
+                done[port] = -1
+            finally:
+                log_f.close()
+
+        wall = time.time() - t0
+        
+        # Collect results from JSON files
+        port_results = []
+        for port in PORTS:
+            label = bench_procs[port][2]
+            rc = done[port]
+            json_path = OUT_DIR / f"{label}.json"
+            if rc != 0:
+                port_results.append({"port": port, "success": False,
+                                     "error": f"rc={rc}"})
+            elif json_path.exists():
+                try:
+                    data = json.loads(json_path.read_text())
+                    port_results.append({
+                        "port": port,
+                        "ttft_p50": data["ttft_ms"]["p50"],
+                        "ttft_p99": data["ttft_ms"]["p99"],
+                        "tpot_p50": data["tpot_ms"]["p50"],
+                        "tp": data["output_tokens_per_s"],
+                        "ok": data["successful_requests"],
+                        "total": data["planned_requests"],
+                        "success": True,
+                    })
+                except Exception as e:
                     port_results.append({"port": port, "success": False,
                                          "error": str(e)})
-
-        threads = []
-        t0 = time.time()
-        for port, (p, label) in procs.items():
-            t = threading.Thread(target=wait_one, args=(port, p, label), daemon=True)
-            t.start()
-            threads.append(t)
-        for t in threads:
-            t.join()
-        wall = time.time() - t0
+            else:
+                port_results.append({"port": port, "success": False,
+                                     "error": "no JSON output"})
 
         ok_results = [r for r in port_results if r.get("success")]
         if ok_results:
