@@ -90,19 +90,17 @@ print(f"[launcher] Monkey-patched EngineCoreProc.run_engine_core: ASCEND_RT_VISI
 
 # ── Monkey-patch 3: file-based barrier for NPU RawDriver init ──
 # NPU RawDriver opens physical device 0 during first set_device call.
-# If HCCL init (DP0) holds device 0 before DP1 workers finish set_device,
-# DP1's RawDriver init fails. Fix: file-based counter sync.
-# Counter is created by the main (API server) process; worker processes
-# increment the counter after set_device and wait until WORLD workers
-# have reported before returning from _init_device (HCCL init follows).
+# HCCL init (_init_worker_distributed_environment) happens inside _init_device,
+# so we can't barrier after _init_device returns. Instead, we patch
+# _init_worker_distributed_environment itself: increment a shared counter
+# after set_device but before HCCL init. Only when all WORLD workers have
+# reported does any worker proceed to HCCL.
 import fcntl as _fcntl
 import time as _time
 
 _SYNC_FILE = "/tmp/dp2tp8_sync.lock"
 
 # ── Main process: create fresh sync file ──
-# Worker processes (spawned) also import this module, but __name__ will be
-# '__mp_main__' in spawn mode, so they skip file creation.
 if __name__ == '__main__':
     try:
         _os.remove(_SYNC_FILE)
@@ -113,7 +111,7 @@ if __name__ == '__main__':
     print(f"[launcher] Created sync file {_SYNC_FILE}", flush=True)
 
 def _sync_counter_increment():
-    """Atomically read and increment counter; return (old_count, new_count)."""
+    """Atomically increment counter; return new count."""
     with open(_SYNC_FILE, "r+") as _f:
         _fcntl.flock(_f, _fcntl.LOCK_EX)
         content = _f.read().strip()
@@ -127,13 +125,12 @@ def _sync_counter_increment():
         return count
 
 import vllm_ascend.worker.worker as _ascend_worker
-_orig_init_device = _ascend_worker.NPUWorker._init_device
+_orig_init_distributed = _ascend_worker.NPUWorker._init_worker_distributed_environment
 
-def _patched_init_device(self):
-    ret = _orig_init_device(self)  # set_device, which triggers RawDriver init
-    # After set_device, use file-based counter to wait for all workers
+def _patched_init_distributed(self):
     pid = _os.getpid()
-    print(f"[BARRIER] PID={pid} device done, waiting for all {WORLD} workers...", flush=True)
+    print(f"[BARRIER] PID={pid} device ready, waiting for all {WORLD} workers...", flush=True)
+    # Wait until all workers have finished their set_device (RawDriver init)
     done = False
     while not done:
         try:
@@ -146,10 +143,10 @@ def _patched_init_device(self):
         if not done:
             _time.sleep(0.5)
     print(f"[BARRIER] PID={pid} proceeding to HCCL init (count={count})", flush=True)
-    return ret
+    return _orig_init_distributed(self)
 
-_ascend_worker.NPUWorker._init_device = _patched_init_device
-print(f"[launcher] Monkey-patched NPUWorker._init_device: file-barrier after set_device", flush=True)
+_ascend_worker.NPUWorker._init_worker_distributed_environment = _patched_init_distributed
+print(f"[launcher] Monkey-patched _init_worker_distributed_environment: barrier before HCCL", flush=True)
 
 MODEL_DIR = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-self"
 
