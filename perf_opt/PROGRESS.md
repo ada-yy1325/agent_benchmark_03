@@ -43,12 +43,11 @@
 - [x] 2.5 调度最优配置小结          产物：summary/sched_best.json
 
 ## 阶段 3 · 并行拓扑（用满 16 卡）
-- [ ] 3.1 确认卡数/拓扑/DP 支持
-- [ ] 3.2 方案A TP8+EP16
-- [ ] 3.3 方案B DP2×TP8
-- [ ] 3.4 方案C TP16
-- [ ] 3.5 方案D DP4×TP4（可选）
-- [ ] 3.6 拓扑选型小结
+- [x] 3.1 确认卡数/拓扑/DP 支持    产物：source code analysis; vllm-ascend 支持 native DP; EP=TP×DP
+- [ ] 3.2 方案C TP16              产物：scripts/run_topo_tp16.py → results/topo/tp16/
+- [ ] 3.3 方案A/B DP2×TP8         产物：scripts/run_topo_dp2tp8.py → results/topo/dp2tp8/
+- [x] 3.5 DP4×TP4                 ❌ 跳过：VRAM临界(54.3/57.6GB)，c≤64场景边际收益低
+- [ ] 3.6 拓扑选型小结            产物：summary/topo_best.json
 
 ## 阶段 4 · MTP 投机解码
 - [ ] 4.1 MTP 状态/接受率核实
