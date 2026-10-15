@@ -39,11 +39,39 @@ PORT = args_cmd.port
 WORLD = TP * DP
 print(f"[launcher] TP={TP}, DP={DP}, WORLD={WORLD}, batched={BATCHED}, max_seqs={MAX_SEQS}, port={PORT}", flush=True)
 
-# ── Monkey-patch: fix single-node data-parallel NPU device assignment ──
-# In vllm-ascend, NPUWorker._init_device uses self.local_rank for device selection.
-# For DP>1 on a single node, both DP groups get local_rank 0..TP-1 and both try
-# to use npu:0..npu:(TP-1), causing SetDevice error 507033 on DP1 workers.
-# Fix: use self.rank (global rank) instead of self.local_rank for device selection,
+# ── Monkey-patch 1: fix single-node data-parallel DP rank offset ──
+# In vllm v1, MultiprocExecutor computes global_start_rank as:
+#   global_start_rank = local_world_size * parallel_config.node_rank_within_dp
+# On a single node with DP>1, node_rank_within_dp defaults to 0 for all DP groups,
+# so both DP groups assign global rank 0..TP-1 to workers. This causes:
+#   1. All workers mapped to NPU 0..TP-1 (device conflict)
+#   2. HCCL rank collision (16 workers sharing 8 unique ranks)
+# Fix: set node_rank_within_dp = data_parallel_rank, so DP1 gets global_start_rank=TP
+import vllm.v1.engine.core as _engine_core
+_orig_run_engine_core = _engine_core.EngineCoreProc.run_engine_core
+
+def _patched_run_engine_core(*args, dp_rank=0, local_dp_rank=0, **kwargs):
+    vllm_config = kwargs.get("vllm_config")
+    if vllm_config is not None:
+        parallel_config = vllm_config.parallel_config
+        if parallel_config.data_parallel_size > 1:
+            # Single-node multi-DP: map each DP group to its own device range
+            parallel_config.node_rank_within_dp = dp_rank
+            print(f"[DP_FIX] dp_rank={dp_rank} node_rank_within_dp={dp_rank} "
+                  f"local_world_size={parallel_config.tensor_parallel_size} "
+                  f"→ global_start_rank={parallel_config.tensor_parallel_size * dp_rank}",
+                  flush=True)
+    return _orig_run_engine_core(*args, dp_rank=dp_rank, local_dp_rank=local_dp_rank, **kwargs)
+
+_engine_core.EngineCoreProc.run_engine_core = _patched_run_engine_core
+print(f"[launcher] Monkey-patched EngineCoreProc.run_engine_core: node_rank_within_dp=dp_rank", flush=True)
+
+# ── Monkey-patch 2: fix single-node data-parallel NPU device assignment ──
+# In vllm-ascend, NPUWorker._init_device selects device via self.local_rank.
+# Even after fixing global_start_rank (patch 1), worker NPUWorker still sees
+# local_rank=0..TP-1 (correct within-group rank, but wrong for device selection
+# when multiple DP groups share one node).
+# Fix: use self.rank (global rank) instead of self.local_rank for NPU device selection,
 # so DP1 workers use npu:TP..npu:(TP+TP-1) correctly.
 import vllm_ascend.worker.worker as _ascend_worker
 _orig_init_device = _ascend_worker.NPUWorker._init_device
@@ -52,8 +80,9 @@ def _patched_init_device(self):
     saved_local_rank = self.local_rank
     saved_rank = self.rank
     self.local_rank = self.rank  # Use global rank for NPU device selection
-    import os
-    print(f"[PATCH] PID={os.getpid()} orig_local_rank={saved_local_rank} orig_rank={saved_rank} -> new_local_rank={self.local_rank}", flush=True)
+    import os as _os
+    print(f"[PATCH] PID={_os.getpid()} local_rank({saved_local_rank}) → rank({saved_rank}) "
+          f"→ NPU{self.local_rank}", flush=True)
     try:
         return _orig_init_device(self)
     finally:
