@@ -45,7 +45,7 @@ print(f"[launcher] TP={TP}, DP={DP}, WORLD={WORLD}, batched={BATCHED}, max_seqs=
 # node_rank_within_dp = node_rank % nnodes_within_dp.
 # On a single node (nnodes=1), node_rank_within_dp is always 0 for all DP
 # groups, so DP1 workers get rank=0..TP-1 (same as DP0), causing HCCL rank
-# collision and device conflict.
+# collision.
 # Fix: override node_rank_within_dp to return data_parallel_rank_local for
 # single-node multi-DP, so DP1 gets global_start_rank=TP=8.
 import vllm.config.parallel as _vllm_parallel
@@ -60,37 +60,32 @@ def _new_nrodp(self) -> int:
 _vllm_parallel.ParallelConfig.node_rank_within_dp = property(_new_nrodp)
 print(f"[launcher] Monkey-patched node_rank_within_dp: data_parallel_rank_local for DP", flush=True)
 
-# ── Monkey-patch 2: fix single-node data-parallel NPU device assignment ──
-# In vllm-ascend, NPUWorker._init_device selects device via self.local_rank (0..TP-1).
-# On a single node with DP>1, both DP groups get local_rank 0..TP-1, causing
-# DP1 workers to try opening already-used NPU 0..TP-1 → SetDevice error 507033.
-# Even with fixed HCCL ranks (patch 1), workers still use local_rank for set_device.
-# Fix: compute device ID from data_parallel_rank * tp_size + local_rank.
-# e.g. DP0→NPU 0-7, DP1→NPU 8-15 without relying on global_start_rank or rank.
-import vllm_ascend.worker.worker as _ascend_worker
-_orig_init_device = _ascend_worker.NPUWorker._init_device
+# ── Monkey-patch 2: partition NPU devices via ASCEND_RT_VISIBLE_DEVICES ──
+# On NPU, setting ASCEND_RT_VISIBLE_DEVICES per DP group restricts each
+# EngineCore+workers to only its own device range, solving:
+#   1. Device assignment: local_rank 0-7 maps to correct physical NPU
+#   2. Driver init: each DP group has its own "device 0", no conflict
+# Approach: intercept EngineCoreProc.run_engine_core and set env var.
+import os as _os
+import vllm.v1.engine.core as _engine_core
+_orig_run_engine_core = _engine_core.EngineCoreProc.run_engine_core
 
-def _patched_init_device(self):
-    saved_local_rank = self.local_rank
-    # Compute NPU device: DP group offset + local TP rank
-    try:
-        dp_rank = self.vllm_config.parallel_config.data_parallel_rank
-    except Exception:
-        dp_rank = getattr(self.vllm_config.parallel_config, 'data_parallel_rank', 0)
-    tp_size = self.vllm_config.parallel_config.tensor_parallel_size
-    device_id = dp_rank * tp_size + saved_local_rank
-    self.local_rank = device_id
-    import os as _os
-    print(f"[PATCH] PID={_os.getpid()} "
-          f"dp_rank={dp_rank} tp_size={tp_size} local={saved_local_rank} "
-          f"→ NPU{device_id}", flush=True)
-    try:
-        return _orig_init_device(self)
-    finally:
-        self.local_rank = saved_local_rank
+def _patched_run_engine_core(*args, dp_rank=0, local_dp_rank=0, **kwargs):
+    vllm_config = kwargs.get("vllm_config")
+    if vllm_config is not None:
+        pc = vllm_config.parallel_config
+        if pc.data_parallel_size > 1:
+            tp_size = pc.tensor_parallel_size
+            start = dp_rank * tp_size
+            end = start + tp_size - 1
+            vis_devices = ",".join(str(i) for i in range(start, end + 1))
+            _os.environ["ASCEND_RT_VISIBLE_DEVICES"] = vis_devices
+            print(f"[DP_PARTITION] dp_rank={dp_rank} "
+                  f"ASCEND_RT_VISIBLE_DEVICES={vis_devices}", flush=True)
+    return _orig_run_engine_core(*args, dp_rank=dp_rank, local_dp_rank=local_dp_rank, **kwargs)
 
-_ascend_worker.NPUWorker._init_device = _patched_init_device
-print(f"[launcher] Monkey-patched NPUWorker._init_device: device=dp_rank*tp+local", flush=True)
+_engine_core.EngineCoreProc.run_engine_core = _patched_run_engine_core
+print(f"[launcher] Monkey-patched EngineCoreProc.run_engine_core: ASCEND_RT_VISIBLE_DEVICES", flush=True)
 
 MODEL_DIR = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-self"
 
