@@ -178,7 +178,7 @@ async def main():
     random.seed(args.seed)
 
     print(f"[bench] Loading tokenizer from {args.model_dir}...", flush=True)
-    tokenizer = AutoTokenizer.from_pretrained(args.model_dir, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(args.model_dir, trust_remote_code=True, local_files_only=True)
     vocab_size = tokenizer.vocab_size
     print(f"[bench] vocab_size={vocab_size}", flush=True)
     special_ids = set()
