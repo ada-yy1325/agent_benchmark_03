@@ -1,3 +1,44 @@
+## 2026-10-16 — Phase 4.2：MTP=OFF vs ON 对比（确认 MTP 拖慢性能）
+
+---
+
+### 关键结论
+
+**MTP=OFF 比 MTP=ON (spec=1) 吞吐量领先 ~2.4%，TPOT 降低 1.8-4.6%。** MTP 接受率仅 4.73%，draft 计算开销超过偶尔正确预测的收益。
+
+### 数据对比
+
+| 指标 | MTP=ON | MTP=OFF | 变化 |
+|:-----|:------|:--------|:-----|
+| 输出吞吐 | 21.43 tok/s | **21.94 tok/s** | **+2.4%** ✅ |
+| Wall Time | 1529s | **1494s** | **-2.3%** ✅ |
+| TPOT P50 | 46.14ms | **45.3ms** | **-1.8%** ✅ |
+| TPOT P99 | 48.81ms | **46.55ms** | **-4.6%** ✅ |
+| TTFT P50 | 356.54ms | 360.3ms | +1.1% |
+| TTFT P99 | 371.2ms | 419.98ms | +13.1% ⚠️ |
+| HBM(MB) | ~3430 | ~3430 | 0% |
+
+### 根本原因
+
+MTP spec=1 的接受率仅 **4.73%**（34,709 draft → 1,642 accepted）。每次 decode step 需要额外的 draft 模型前向传播（约 50% 额外计算），但只有 5% 的 draft token 被实际接受。**净效果：MTP 拖慢了性能。**
+
+### 建议
+
+对于 DeepSeek-V4-Flash-W8A8 在生产环境中，**推荐关闭 MTP**。W8A8 量化可能降低了 MTP head 的预测准确率，导致接受率极低。
+
+### 数据存储
+
+- 汇总：`summary/mtp_comparison.json`
+- 接受率详情：`summary/mtp_acceptance.json`
+- MTP=ON 基准：`results/mtp/mtp_1/mtp1_probe_c1.json`
+- MTP=OFF 基准：`results/mtp/mtp_off/mtp_off_probe_c1.json`
+
+### 待解决
+
+- [ ] spec=2 是否支持（接受率可能更高但计算开销增加）
+- [ ] `enforce_eager: false` 是否影响 MTP 接受率
+
+---
 ## 2026-10-16 — Phase 4.1：MTP 接受率摸底（关键发现！）
 
 ---

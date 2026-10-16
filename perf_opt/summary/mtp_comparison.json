@@ -1,0 +1,70 @@
+{
+  "phase": "4-mtp-comparison",
+  "summary": "MTP=OFF vs MTP=ON (spec=1) comparison — MTP=OFF IS FASTER due to low 4.73% acceptance rate",
+  "date": "2026-10-16",
+  "config": {
+    "tp": 8,
+    "dp": 1,
+    "batched": 8192,
+    "max_seqs": 64,
+    "model": "DeepSeek-V4-Flash-W8A8",
+    "npu": "910B2C x8"
+  },
+  "bench_params": {
+    "input_len": 4096,
+    "output_len": 1024,
+    "concurrency": 1,
+    "num_requests": 32,
+    "temperature": 0.0,
+    "seed": 42
+  },
+  "mtp_on": {
+    "acceptance_rate": 0.0473,
+    "wall_time_s": 1529.04,
+    "output_tok_s": 21.43,
+    "total_tok_s": 107.15,
+    "ttft_p50_ms": 356.54,
+    "ttft_p99_ms": 371.2,
+    "ttft_mean_ms": 347.78,
+    "tpot_p50_ms": 46.14,
+    "tpot_p99_ms": 48.81,
+    "tpot_mean_ms": 46.36,
+    "e2e_p50_ms": 47561.71,
+    "e2e_p99_ms": 50297.17,
+    "peak_hbm_mb_per_npu": [3430, 3423, 3431, 3429, 3427, 3424, 3427, 3423]
+  },
+  "mtp_off": {
+    "wall_time_s": 1493.79,
+    "output_tok_s": 21.94,
+    "total_tok_s": 109.68,
+    "ttft_p50_ms": 360.3,
+    "ttft_p99_ms": 419.98,
+    "ttft_mean_ms": 355.94,
+    "tpot_p50_ms": 45.3,
+    "tpot_p99_ms": 46.55,
+    "tpot_mean_ms": 45.27,
+    "e2e_p50_ms": 46690.67,
+    "e2e_p99_ms": 47978.28,
+    "peak_hbm_mb_per_npu": [3430, 3423, 3431, 3429, 3427, 3424, 3427, 3423]
+  },
+  "delta": {
+    "wall_time_s": -35.25,
+    "wall_time_pct": -2.31,
+    "output_tok_s": 0.51,
+    "output_tok_s_pct": 2.38,
+    "tpot_p50_ms": -0.84,
+    "tpot_p50_pct": -1.82,
+    "tpot_p99_ms": -2.26,
+    "tpot_p99_pct": -4.63,
+    "ttft_p50_ms": 3.76,
+    "ttft_p50_pct": 1.05,
+    "ttft_p99_ms": 48.78,
+    "ttft_p99_pct": 13.14
+  },
+  "conclusion": "MTP=OFF 在吞吐量上领先约 2.4%，TPOT 降低 1.8-4.6%。MTP spec=1 接受率仅 4.73%，draft 计算的开销超过了偶尔正确预测带来的加速效果。对于此模型（W8A8 量化），推荐在生产中关闭 MTP。",
+  "next_questions": [
+    "spec=2 是否支持？（如果支持，接受率可能更高但计算开销也更大）",
+    "enforce_eager 是否影响 MTP 性能？",
+    "不同温度/采样策略下接受率是否变化？"
+  ]
+}

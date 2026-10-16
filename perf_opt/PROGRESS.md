@@ -3,7 +3,10 @@
   - MTP=1 接受率：4.73%（极低！）
   - c=1×32req: TTFT=356.54ms, TPOT=46.14ms, TP=21.43 tok/s
   - 初步结论：MTP=OFF 可能比 MTP=ON 更快（节省 draft 模型计算，无效 draft 开销极大）
-- [ ] 4.2 MTP=OFF 对比基准
+- [x] 4.2 MTP=OFF 对比基准 ✅         产物：perf_opt/summary/mtp_comparison.json
+  - MTP=OFF 吞吐+2.4%, TPOT-1.8% — **MTP=OFF 比 ON 更快！**
+  - 根因：接受率 4.73% → draft 计算开销 > 收益
+  - 生产建议：关闭 MTP
 - [ ] 4.3 spec=2 vs spec=1 对比
 - [ ] 4.4 enforce_eager 作用域验证
 # 进度：阶段 0 + 1
