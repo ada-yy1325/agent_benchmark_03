@@ -44,8 +44,8 @@
 - [x] 2.0 测量核实（显存/拓扑/MTP）   产物：env/recheck.json
 - [x] 2.1 chunked prefill 状态      产物：results/sched/chunk_status.md
 - [x] 2.2 扫 max-num-batched-tokens  产物：results/sched/bat_scan/ (8/8, 最优=8192, 即是基线)
-- [x] 2.3 扫 max-num-seqs           产物：results/sched/seqs_scan/ (8/8, 最优=64→TTFT 2.5s, 25× ↑)
-- [x] 2.4 组合验证 c=32/48/64       产物：results/sched/final/ (c32=957ms, c48=12.6s, c64=13.9s; prefill瓶颈确认)
+- [x] 2.3 扫 max-num-seqs           产物：results/sched/seqs_scan/ (clean, 最优=64 → c64 TTFT 62.7s→2.5s, 25× ↓)
+- [x] 2.4 组合验证 c=32/48/64       产物：results/sched/final/ ⚠️ 该批数据被并发压测污染（wall 虚高 3.5-4×），TTFT 数字勿引用；吞吐可参考（c32=530, c48=564, c64=640 tok/s）；c64 正式 TTFT 以 2.3 的 2522ms 为准（见 2026-10-16 全量复核）
 - [x] 2.5 调度最优配置小结          产物：summary/sched_best.json
 
 ## 阶段 3 · 并行拓扑（用满 16 卡）

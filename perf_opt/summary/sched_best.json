@@ -24,21 +24,24 @@
       "ttft_p50_ms": 12632,
       "tp_tok_s": 564,
       "tpot_p50_ms": 65.7,
-      "success_rate": 1.0
+      "success_rate": 1.0,
+      "data_quality": "CONTAMINATED - wall 929s vs ~232s expected from own throughput; concurrent benches on same server. DO NOT CITE."
     },
     "c64_4k": {
       "ttft_p50_ms": 13926,
       "tp_tok_s": 640,
       "tpot_p50_ms": 65.0,
-      "success_rate": 1.0
+      "success_rate": 1.0,
+      "data_quality": "CONTAMINATED - wall 819s vs ~205s expected; concurrent benches on same server. Clean scan value (same config, same day, seqs_scan/seqs64_c64_4k.json) = 2522 ms. USE 2522 ms."
     }
   },
   "vs_baseline": {
     "baseline_config": "batched=8192, seqs=32",
     "c32_ttft_delta": "-68ms (-6.6%)",
-    "c64_ttft_delta": "-48769ms (-77.8%)",
+    "c64_ttft_delta": "-48769ms (-77.8%) [contaminated final number; clean scan: 62152->2522ms = -96%]",
     "c64_tp_delta": "+118 tok/s (+22.6%)"
   },
+  "audit_note": "2026-10-16 audit: final verification runs (16:00-16:40, 10-14) were contaminated by concurrent benches (wall 3.5-4x expected). Clean scan numbers: c32=1024ms, c64=2522ms (seqs64 server, walls self-consistent). max_seqs=64 improvement is 25x (62.7s->2.5s), stronger than the summary states.",
   "scan_summary": {
     "batched_tokens_scan": {
       "tested": [2048, 4096, 8192, 16384],

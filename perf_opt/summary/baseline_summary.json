@@ -13,6 +13,7 @@
   "ttft_p50_ms": 355.0,
   "tpot_mean_ms": 92.0,
   "tpot_p50_ms": 91.9,
+  "tpot_correction_note": "2026-10-16 audit: 92ms is per-SSE-chunk time (chunk counting artifact, ~2 tokens/chunk). True per-token TPOT is ~46ms, consistent with phase 1/4 measurements (45.3-46.1ms). Do not cite 92ms.",
   "throughput_mean_out_tok_per_s": 10.81,
   "throughput_mean_total_tok_per_s": 97.29,
   "wall_time_mean_s": 1515.6,

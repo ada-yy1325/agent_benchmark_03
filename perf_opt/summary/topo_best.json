@@ -8,13 +8,14 @@
     "vllm_version": "0.23.0",
     "benchmark_params": {"input_len": 4096, "output_len": 1024, "batched": 8192, "max_seqs": 64}
   },
+  "audit_note": "2026-10-16 audit: TTFT values below are NOT comparable across days (cross-day drift 2-5x at c>=8; see logbook 2026-10-16 阶段0-4全量复核). Throughput verdicts are reliable. TP8 c64 TTFT should read 2522ms (clean phase-2 scan), not 13926ms (contaminated final run). Two-server c32/c64 TTFT values are unreliable (per-server 6.6x imbalance at c64).",
   "schemes": {
     "TP8_baseline": {
       "status": "completed", "cards": 8,
       "desc": "Single TP8 server, optimal config from Phase 2",
       "c1": {"ttft_p50_ms": 355,  "tp_tok_s": 21.9, "tpot_p50_ms": 45.4},
       "c32": {"ttft_p50_ms": 957, "tp_tok_s": 530, "tpot_p50_ms": 58.3},
-      "c64": {"ttft_p50_ms": 13926, "tp_tok_s": 640, "tpot_p50_ms": 65.0}
+      "c64": {"ttft_p50_ms": 13926, "tp_tok_s": 640, "tpot_p50_ms": 65.0, "corrected_ttft_p50_ms": 2522, "correction_note": "clean scan value; 13926 from contaminated final run"}
     },
     "TP16": {
       "status": "INFEASIBLE", "cards": 16,
@@ -31,8 +32,8 @@
       "desc": "Two independent TP8 servers (ASCEND_RT_VISIBLE_DEVICES=0-7 + 8-15), client-side NREQ/2 split",
       "c1": {"ttft_p50_ms": 447, "tp_tok_s": 42.2, "tpot_p50_ms": 47.0},
       "c8": {"ttft_p50_ms": 586, "tp_tok_s": 242.4, "tpot_p50_ms": 57.1},
-      "c32": {"ttft_p50_ms": 26015, "tp_tok_s": 588.7, "tpot_p50_ms": 67.7},
-      "c64": {"ttft_p50_ms": 45608, "tp_tok_s": 812.7, "tpot_p50_ms": 71.7},
+      "c32": {"ttft_p50_ms": 26015, "tp_tok_s": 588.7, "tpot_p50_ms": 67.7, "ttft_reliability": "UNRELIABLE - cross-day drift + possible client-side split issues; throughput ok"},
+      "c64": {"ttft_p50_ms": 45608, "tp_tok_s": 812.7, "tpot_p50_ms": 71.7, "ttft_reliability": "UNRELIABLE - see audit_note; throughput ok"},
       "per_server_c64": {
         "port8000_npu0-7": {"ttft_p50_ms": 12041, "tp_tok_s": 410.0},
         "port8001_npu8-15": {"ttft_p50_ms": 79174, "tp_tok_s": 402.7}
