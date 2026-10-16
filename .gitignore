@@ -224,3 +224,4 @@ outputs/
 *.log
 eval_*.json
 eval_checkpoint.json
+__pycache__/

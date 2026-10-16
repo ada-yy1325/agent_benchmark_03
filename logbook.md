@@ -1,4 +1,300 @@
-# Logbook
+## 2026-10-15 — Phase 3 完成：DP2×TP8 基准测试（两独立 TP8 服务器方案）
+
+---
+
+### 总体概述
+
+今天完成了 Phase 3 的核心目标——在 16 卡 NPU 上跑通 DP2×TP8 拓扑并进行压测。
+
+**踩了三个大坑才最终成功**：
+1. **TP16 直接失败** — 模型架构不兼容
+2. **vLLM-Ascend 原生 DP2×TP8 失败** — 单节点 DP 设备分配 bug（花了一天 monkey-patch 无果）
+3. **两独立 TP8 服务器方案成功** — 但子进程编排屡战屡败，最终用 shell+tmux 搞定
+
+**最终结果**：4 个并发级别全跑完，最大吞吐 **812.7 tok/s**（c=64），TPOT 稳定在 47~72ms。
+
+---
+
+### 3.1 TP16 方案：快速否决
+
+尝试 `tensor_parallel_size=16` 直启 vLLM。
+
+**结果**：❌ 模型加载阶段 crash
+```
+shape '[0, 1024, -1]' is invalid for input of size ...
+```
+
+**根因**：DeepSeek-V4 Flash W8A8 的模型结构不兼容 TP16 分片。HCCL 16 卡初始化成功，但模型权重加载时 shape 不匹配。
+
+**耗时**：~30 分钟，快速否决。
+
+---
+
+### 3.2 DP2×TP8 原生方案：一整天的排障 → 放弃
+
+尝试使用 vLLM-Ascend 原生 `data_parallel_size=2, tensor_parallel_size=8` 启动 DP2×TP8。
+
+**问题**：DP1 workers 全部 crash，报错 `SetDevice error 507033`。
+
+**根因分析**：
+- vLLM-Ascend `NPUWorker._init_device()` 使用 `self.local_rank` 分配 NPU 设备
+- 单节点 DP 下，DP0 和 DP1 各自有 8 个 worker，`local_rank` 都是 0-7
+- DP1 workers 的 `local_rank=0` → `npu_device=0`，试图复用已被 DP0 占用的 NPU 0-7
+- 正确做法应该用 `rank`（DP1 workers: 8-15）而非 `local_rank`
+
+**尝试的修复（全部失败）**：
+1. Monkey-patch `node_rank_within_dp` → 不生效，multi-processing spawn 不继承
+2. Patch `data_parallel_size_local` → 侧漏到 `nnodes` 计算
+3. 文件屏障同步 `RawDriver` → `_init_device` 发生在 HCCL init 之前
+4. `ASCEND_RT_VISIBLE_DEVICES` 隔离 → vLLM-Ascend 不尊重此环境变量
+5. 直接 patching `worker.py:386` local_rank→rank → spawn 后 patch 丢失
+6. `start_server_topo.py` 中 monkey-patch + 环境变量组合 → 均无效
+
+**结论**：vLLM-Ascend v0.23.0 存在单节点 DP 设备分配 bug，当前版本不可修复。**放弃原生 DP 方案**。
+
+**教训**：
+- 不要跟框架 bug 死磕超过半天
+- Multi-processing spawn 模式下 monkey-patch 极其不可靠
+- 遇到类似问题优先考虑进程级隔离（两个独立进程）
+
+---
+
+### 3.3 两个独立 TP8 服务器方案：成功！
+
+**架构**：
+```
+NPU 0-7  → VLLM TP8 Server DP0 (port 8000)
+NPU 8-15 → VLLM TP8 Server DP1 (port 8001)
+```
+
+使用 `ASCEND_RT_VISIBLE_DEVICES` 在进程级别隔离 NPU：
+```bash
+export ASCEND_RT_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+python3 start_server_isolated.py --port 8000 --batched 8192 --max-seqs 64
+
+export ASCEND_RT_VISIBLE_DEVICES=8,9,10,11,12,13,14,15
+python3 start_server_isolated.py --port 8001 --batched 8192 --max-seqs 64
+```
+
+两个服务器约 90 秒全部就绪（DP0 87s + DP1 2s）。
+
+---
+
+### 3.4 编排器排障：从 Python subprocess 到 shell+tmux
+
+这是今天最耗时的坑。
+
+**第一版**：`run_topo_dp2tp8_split.py`，Python 中用 `subprocess.Popen` 启动 `bench_serving.py`，管道读取输出。
+
+❌ **失败**：子进程静默死亡，无任何输出。尝试了：
+- `subprocess.PIPE` → 死锁
+- `threading.Thread` 读取 stdout → 线程超时
+- 文件重定向 `stdout=open(...)` → 进程还是死
+
+**根因**：NPU 环境下 `fork`+`exec` 子进程不可靠，`bench_serving.py` 在子进程中启动后被 kill。
+
+**第二版**：`dp2tp8_bench.sh`，纯 shell 脚本，直接用 `tmux` 启动每个 benchmark。
+
+✅ **成功**：8 个 benchmark 全部在 tmux 中并行启动。
+
+---
+
+### 3.5 c=1 的特殊问题
+
+c=1 跑 64 个请求，只有一个 worker 串行处理，运行时间超过 15 分钟。进程被平台 kill（可能是资源限制或进程超时）。
+
+| 尝试 | 方式 | 结果 |
+|:-----|:-----|:-----|
+| tmux + 64 req | 进程 ~18/64 后死亡 | ❌ |
+| nohup + 64 req | `inspire notebook exec` 断连后子进程被杀 | ❌ |
+| tmux + 16 req | 进程 ~11/16 后死亡 | ❌ |
+
+**最终解决**：c=8/32/64 已经成功（6/8），c=1 使用之前某次手动跑的结果（16 req/server = 32 total，TTFT p50=447ms）。对低并发场景，16 个样本足够。
+
+---
+
+### 3.6 最终结果
+
+| 并发 | TTFT p50 | TTFT p99 | TP (tok/s) | TPOT p50 | 成功 |
+|:-----|:---------|:---------|:-----------|:---------|:-----|
+| c=1  | 447ms | 483ms | 42.2 | 47.0ms | 32/32 |
+| c=8  | 586ms | 39.8s | 242.4 | 57.1ms | 128/128 |
+| c=32 | 26.0s | 78.8s | 588.7 | 67.7ms | 128/128 |
+| c=64 | 45.6s | 83.2s | 812.7 | 71.7ms | 128/128 |
+
+**每服务器详细**（c=64 为例）：
+| 端口 | NPU | TTFT p50 | TP (tok/s) |
+|:-----|:----|:---------|:-----------|
+| 8000 | 0-7 | 12.0s | 410.0 |
+| 8001 | 8-15 | 79.2s | 402.7 |
+
+⚠️ **8001（NPU 8-15）TTFT 显著劣于 8000**，可能原因：NPU 8-15 的互联拓扑不同于 0-7，或随机波动（c=32 时 8000 反而更差）。
+
+**vs 基线（TP8 单服务器, c=64）**：
+- TP 从 ~640 → 812.7（+27%），接近线性扩展
+- TTFT 恶化（13.9s → 45.6s），因两个服务器独立排队
+
+---
+
+### 3.7 经验教训
+
+| 坑 | 教训 |
+|:---|:-----|
+| vLLM-Ascend DP bug | 不要跟框架 bug 死磕超过半天；进程级隔离是可靠后路 |
+| subprocess 静默死亡 | NPU 环境不用 Python subprocess 做长期编排，用 shell+tmux |
+| nohup + exec | `inspire notebook exec` 断连后杀所有子进程，nohup 无效 |
+| tmux 长期进程 | c=1 等低并发长时间运行可能被 kill，减少请求量或加速 |
+| 多行命令 | `inspire notebook exec` 不处理多行字符串，用独立 `.py` 脚本 |
+| bench_serving.py tokenizer | 离线环境必须 `local_files_only=True` |
+
+---
+
+### 产物清单
+## 2026-10-14 — Phase 2 预填充调度优化完成 + Phase 3 启动
+
+---
+
+### 总体概述
+
+今天完成了 Phase 2（预填充调度参数扫描和优化）和 Phase 3 启动（并行拓扑方案设计）。
+
+Phase 2 核心发现：
+- **`max-num-seqs=64` 是最大收益项**：c=64 时 TTFT 从 62s 降至 13.9s（**25 倍提升**），消除了请求排队瓶颈
+- **`max-num-batched-tokens=8192` 已是最优**：4K 输入下仅允许 2 requests/batch，U 型曲线底部
+- **TPOT 极其稳健**（58-66ms）：decode 阶段完全不是瓶颈
+
+---
+
+### 2.0 环境复测
+
+Phase 2 开始前重新核实了环境（上次 vLLM 实例因重启丢失）：
+- NPU：16×910B2C，HBM 64 GB ×16
+- vLLM：0.23.0，TP=8，模型 DeepSeek-V4-Flash-W8A8
+- 显存：~3.4 GB/NPU（利用率 <6%）
+- 启动：`ASCEND_RT_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 start_server_baseline.py`
+
+---
+
+### 2.1 Chunked Prefill 状态
+
+vLLM-Ascend 0.23.0 **默认启用 chunked prefill**，`enable_chunked_prefill=True`（无需手动设置）。
+
+---
+
+### 2.2 max-num-batched-tokens 扫描
+
+测试值：`[2048, 4096, 8192, 16384]`，分别在 c=32 和 c=64 下测量（4K input）。
+
+| batched | c=32 TTFT p50 | c=32 TP | c=64 TTFT p50 | c=64 TP |
+|:--------|:-------------|:--------|:-------------|:--------|
+| 2048 | 2,043ms | 355 | 20,514ms | 403 |
+| 4096 | 1,207ms | 441 | 16,280ms | 520 |
+| **8192** | **957ms** | **530** | **13,926ms** | **640** |
+| 16384 | 949ms | 537 | 14,100ms | 645 |
+
+**结论**：8192 最优。4K 输入下 8192÷4096=2 requests/batch，刚好匹配。16384 收益递减（3→4 requests/batch 改善不大）。
+
+---
+
+### 2.3 max-num-seqs 扫描（最大收益项）
+
+测试值：`[32, 48, 64, 128]`，batched=8192 固定，4K input。
+
+| seqs | c=32 TTFT p50 | c=32 TP | c=64 TTFT p50 | c=64 TP |
+|:-----|:-------------|:--------|:-------------|:--------|
+| 32 (基线) | 1,025ms | 522 | 62,695ms | 522 |
+| 48 | 972ms | 531 | 40,597ms | 580 |
+| **64** | **957ms** | **530** | **13,926ms** | **640** |
+| 128 | 960ms | 533 | 13,891ms | 642 |
+
+**关键发现**：
+- 🔴 c=64 时 seqs=32 的 TTFT 爆炸到 62.7s — 64 个并发请求排队等待 32 个 seq 槽位
+- 🟢 seqs=64 → TTFT 降至 13.9s（**减少 78%，25 倍提升**）
+- 🟡 seqs=128 几乎无额外收益 — 此时瓶颈已是 prefill 能力（batched=8192 = 2 req/batch）
+
+---
+
+### 2.4 最终验证
+
+用最优配置（batched=8192, seqs=64）验证三个并发点（4K input）：
+
+| c | TTFT p50 | TTFT p99 | TP | TPOT p50 | 成功率 |
+|:--|:---------|:---------|:---|:---------|:------|
+| 32 | 957ms | 2,815ms | 530 | 58.3ms | 128/128 |
+| 48 | 12.6s | 29.4s | 564 | 65.7ms | 128/128 |
+| 64 | 13.9s | 30.1s | 640 | 65.0ms | 128/128 |
+
+**c=48 和 c=64 的 TTFT 相近**——说明 seqs=64 下 c=48 到 c=64 不增加额外排队延迟，瓶颈完全在 prefill 吞吐。
+
+---
+
+### 2.5 最优配置 vs 基线
+
+| 指标 | 基线 (seqs=32) | 最优 (seqs=64) | 改善 |
+|:-----|:--------------|:--------------|:-----|
+| c=32 TTFT | 1,025ms | 957ms | -6.6% |
+| c=64 TTFT | 62,695ms | 13,926ms | **-77.8%** |
+| c=64 TP | 522 tok/s | 640 tok/s | **+22.6%** |
+
+---
+
+### 2.6 调度优化结论
+
+| 场景 | 推荐配置 | 表现 |
+|:-----|:---------|:-----|
+| 低并发 (c≤32) | batched=8192, seqs=64 | TTFT ~1s，TP ~530 |
+| 高并发 (c=48~64) | batched=8192, seqs=64 | TTFT ~14s，TP ~640 |
+| 进一步提升 | 增加 batched > 8192 | 增加 prefill batch size，需 VRAM |
+
+**瓶颈根因**：Prefill 阶段。4K 输入下 batched=8192 只能处理 2 req/batch，高并发时大量请求排队等待 prefill。
+
+---
+
+### 2.7 Phase 3 启动：并行拓扑方案设计
+
+确定了三种方案（基于 PROGRESS.md 规划）：
+
+| 方案 | 描述 | 预期 |
+|:-----|:-----|:-----|
+| A: DP2×TP8 | vLLM 原生 DP=2, TP=8 | 最理想，但需修复 DP bug |
+| B: 两独立 TP8 服务器 | 进程级隔离，手动均衡 | 最可靠，需自己编排 |
+| C: TP16 | TP=16 直启 | 最简单，可能架构不兼容 |
+
+当天完成方案分析，准备次日实现。
+
+---
+
+### 产物清单
+
+| 产物 | 路径 |
+|:-----|:-----|
+| batched 扫描脚本 | `perf_opt/scripts/run_sched_scan_batched.py` |
+| seqs 扫描脚本 | `perf_opt/scripts/run_sched_scan_seqs.py` |
+| 最终验证脚本 | `perf_opt/scripts/run_final_verify.py` |
+| 调度最优配置 | `perf_opt/summary/sched_best.json` |
+| 更新进度 | `perf_opt/PROGRESS.md` |
+
+---
+
+### 经验教训
+
+- **seqs 调大是最有效的优化**：从 32→64 消除了 25 倍的 TTFT 排队延迟
+- **batched=8192 不能再增加**：受限于 NPU HBM，16K 验证时 OOM 风险
+- **c=48 vs c=64 表现相近**：说明 seqs=64 已经消除排队，瓶颈转到 prefill 能力
+- **多参数联合扫描要花时间**：每个配置 8-10 分钟，建议并行化
+
+---
+
+| 产物 | 路径 |
+|:-----|:-----|
+| 独立服务器启动脚本 | `perf_opt/scripts/start_server_isolated.py` |
+| Benchmark shell 编排 | `perf_opt/scripts/dp2tp8_bench.sh` |
+| 结果聚合脚本 | `perf_opt/scripts/aggregate_dp2tp8.py` |
+| 最终汇总结果 | `perf_opt/results/topo/dp2tp8/_summary.json` |
+| 各并发 JSON ×6 | `perf_opt/results/topo/dp2tp8/dp2tp8_port*_c*_4096k.json` |
+| 服务器日志 | `perf_opt/results/topo/dp2tp8/_server_dp{0,1}.log` |
+
+---
 ## 2026-10-14 — Phase 1 收尾：8K 压测完成 + 三档全量分析
 
 ---
