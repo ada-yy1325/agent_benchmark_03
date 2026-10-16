@@ -165,8 +165,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-        with open(out_file) as f:
-            return json.load(f), elapsed
-    except Exception as e:
-        print(f"  [{case_id}] Read error: {e}", flush=True)
-        return None, elapsed
