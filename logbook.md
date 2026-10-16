@@ -1,45 +1,71 @@
-## 2026-10-16 — Phase 4.3 收尾 + 全量审计（复核 Cline 结论）
+## 2026-10-16 — 阶段 4 完成 + 全量复核（MTP 投机解码收尾，含审计与问题解决全记录）
 
 ---
 
-### 关键结论（审计后）
+### 一、今天完成的内容（时间线）
 
-**MTP=OFF 维持生产推荐，但 Cline 的数据有两处需要修正，一处需要标注。**
+| 时间 | 事项 | 产物 |
+|:-----|:-----|:-----|
+| 12:08-12:10 | 首个 MTP=1 服务器尝试（eager=False）启动即崩 | `_server_mtp1.log` |
+| 12:13-13:12 | 换 isolate 启动脚本，MTP=1 服务器正常（其配置实为 spec=1 + eager） | `_server_isolated.log` |
+| 12:46-13:12 | **4.1 接受率摸底**：c1×32req 压测 + /metrics 接受率抓取 → 4.73% | `summary/mtp_acceptance.json` |
+| 13:22-14:51 | 真正的 MTP=OFF 服务器启动（无 speculative config） | `_server_mtp_off.log` |
+| 13:26-14:53 | **4.2 OFF vs ON 对比 + 4.3 矩阵**：OFF 侧 c1/c8/c32 三点压测完成 | `results/mtp/mtp_off/` |
+| 15:11-15:24 | 矩阵编排器补跑：MTP=1 侧 c8/c32；spec=2 服务器尝试失败 | `_srv_mtp1.log`、`_srv_mtp2.log` |
+| ~15:40 | **Cline 卡死**（见问题 1），任务移交 Claude Code 接管 | — |
+| 16:05-16:17 | **c8 异常复核**：MTP=1 新服务器重跑 c8 → TTFT 554.2ms，接受率复测 4.35% | `mtp_1_probe_c8.json`（16:17 版） |
+| 16:20-16:28 | **c8 对照复核**：MTP=OFF 新服务器重跑 c8 → TTFT 1389.5ms（原 1420.6 复现） | `mtp_off_probe_c8.json`（16:28 版） |
+| 16:29-16:36 | **自然文本接受率探针**：16 请求真实中英文提示词 → 接受率 16.64% | `results/mtp/accept_natural.json` |
+| 16:36-17:00 | 数据溯源审计（问题 5）、修正 spec=2 归因（问题 3）、产物落库、提交推送 d7926f1 | `summary/mtp_best.json`、`env/mtp_status.json`、PROGRESS/logbook |
 
-### 审计动作与结果
+### 二、最终结论
 
-| 项目 | Cline 原结论 | 审计结果 |
-|:-----|:-------------|:---------|
-| 接受率 4.73% | 极低，MTP 无用 | ✅ 测量方法正确（/metrics 计数器差值）。但仅在随机 token 输入下成立；**自然文本上为 16.64%**（16 请求实测）。仍远低于 MTP 回本所需的 60-85% |
-| c8 TTFT 异常（ON 比 OFF 低 46%） | "异常，需复现" | ✅ **已复核为真实现象**：OFF c8 复测 1389.5ms（原 1420.6），ON c8 复测 554.2ms（原 765.2）。方向稳定，ON 的 TTFT 约为 OFF 的 40%；ON 侧数值本身波动大（554 vs 765） |
-| spec=2 不支持 | 归因"W8A8 量化不兼容" | ❌ **归因错误**。真实原因：`ValueError: Can't determine cudagraph shapes... multiple of 3 (num_speculative_tokens + 1)... and 8 (tensor_parallel_size)` — spec+1=3 与 TP=8 序列并行不互质。报错原文提示可"关闭序列并行"解开。与量化无关。但接受率过低，不值得去解 |
-| MTP 强制 eager | （Cline 的修复动作） | ✅ 必要且无解：eager=False 的 MTP 服务器 NPUModelRunner 初始化即崩（12:08 日志）。因此 ON-vs-OFF 对比包含 eager-vs-cudagraph 代价，是生产真实对比 |
+**生产配置：MTP=OFF**（TP8 / DP1 / batched 8192 / max_seqs 64 / ascend 量化，其余同阶段 2/3 最优配置）。
 
-### 验证后的净收益表（4K→1K, 32req, temp=0）
+- 接受率：随机 token 输入 4.35-4.73%，自然文本 16.64% —— 均远低于 MTP 回本所需的 60-85%。
+- 全并发下 MTP=ON 的吞吐/TPOT 均差于 OFF（-2.3% ~ -10%）。
+- **唯一例外**：c=8 时 MTP=ON 把 TTFT 约减半（554ms vs 1389ms，双侧重跑验证为真实现象）。若未来有"并发≈8、首字延迟优先于吞吐"的场景，MTP=ON 是可选配置。
+- spec=2 不支持（cudagraph shape 冲突，见问题 3），且接受率条件下无意义。
 
-| 并发 | 指标 | OFF | MTP=1 | MTP=1 相对 |
-|:-----|:-----|:----|:------|:-----------|
-| c1 | 吞吐 tok/s | 21.94 | 21.43 | -2.3% |
-| c8 | TTFT p50 | 1389.5ms | 554.2ms | **-60%** ✅ 已验证 |
-| c8 | 吞吐 tok/s | 176.14 | 160.02 | -9.2% |
-| c32 | 吞吐 tok/s | 557.66 | 506.01 | -9.3% |
+### 三、验证后的全量数据（4K→1K, 32req, temp=0, seed=42）
 
-### 最终配置
+| 配置 | 并发 | TTFT p50 (ms) | TPOT p50 (ms) | 吞吐 (out tok/s) | Wall (s) |
+|:-----|:-----|:--------------|:--------------|:-----------------|:---------|
+| OFF | c1 | 360.3 | 45.3 | 21.94 | 1493.8 |
+| OFF | c8 | **1389.5**（复核 16:28；原测 1420.6） | 44.03 | 176.14 | 186.0 |
+| OFF | c32 | 4844.2 | 52.32 | 557.66 | 58.8 |
+| MTP=1 | c1 | 356.5 | 46.14 | 21.43 | 1529.0 |
+| MTP=1 | c8 | **554.2**（复核 16:17；原测 765.2） | 48.38 | 160.02 | 204.8 |
+| MTP=1 | c32 | 5304.4 | 56.53 | 506.01 | 64.8 |
 
-- **生产（吞吐优先）：MTP=OFF**，TP8/DP1/batched 8192/max_seqs 64，其余同阶段 2/3 最优配置
-- **可选场景**：并发≈8 且首字延迟比吞吐重要时，MTP=ON 可把 TTFT 约减半（代价 ~9% 吞吐）
-- spec=2 不支持（shape 冲突），接受率条件下也无意义
+接受率（三组独立测量）：4.73%（c1 随机）/ 4.35%（c8 随机，复核）/ 16.64%（自然文本）。
 
-### 数据
+### 四、遇到的问题与解决方法（全部）
 
-- `summary/mtp_best.json`（审计版）、`env/mtp_status.json`、`results/mtp/accept_natural.json`
-- `results/mtp/mtp_{off,1}/mtp_{off,1}_probe_c8.json`（16:17/16:28 复核版）
-- 复核日志：`results/mtp/_srv_verify_1.log` / `_srv_verify_off.log`（远端）
+**问题 1：Cline 卡死。** 15:43 起 Cline 发出 API 请求后 13+ 分钟无响应。排查结论：不是本地进程卡死（无挂起子进程），是其恢复了 3165 条消息的巨型上下文任务，请求体过大，API 中转（GCP 上的 openai-compatible 端点）不回包；TCP 连接 ESTABLISHED 但零响应字节。解卡：Cline 面板 Cancel/New Task 或 Reload Window（任务历史有存档不丢）。教训：巨型上下文任务反复 resume 是 Cline 卡住的主因，应开新任务。
 
-### 遗留
+**问题 2：远端脚本上传被各种方式挡住。** `quant-test` 是受限 Notebook（无 SSH/SCP），上传 5KB 脚本时依次遇到：① 本地 stdin 管道被 CLI 拒绝（rc=12）；② 单条命令 ~2049 字符处被截断（base64 首段损坏，`base64: invalid input`）；③ 远端无 `xxd`。解决：把脚本 hex 编码后按 **<1600 字符分块**，用 `python3 -c "open('PATH','ab').write(bytes.fromhex('HEX'))"` 逐块追加（纯 hex 无特殊字符、无需 xxd）；用 python subprocess 调 inspire 时必须 `stdin=subprocess.DEVNULL`（否则 heredoc 的 stdin 被 CLI 误判为管道输入）。
 
-- 生产采样分布（temp>0、真实流量）下的接受率
-- c8 处 MTP 降低 TTFT 的机制（疑似调度/图模式交互，vllm-ascend 侧）
+**问题 3：spec=2 "与 W8A8 量化不兼容"归因错误（Cline 原结论）。** 真实报错：`ValueError: Can't determine cudagraph shapes that are both a multiple of 3 (num_speculative_tokens + 1) required by spec-decode and 8 (tensor_parallel_size) required by sequence parallelism`。spec+1=3 与 TP=8 不互质，cudagraph 无法定形；报错原文提示可调整 num_speculative_tokens 或关闭序列并行。与量化无关。修正已写入 `mtp_best.json` / `env/mtp_status.json`。
+
+**问题 4：MTP 在此栈上强制 enforce_eager=True。** 12:08 的 MTP=1（eager=False）服务器启动即崩（`NPUModelRunner init failed: 'NoneType' object is not subscriptable`），而 eager=True 的 isolate 服务器正常。因此 ON-vs-OFF 对比包含 eager-vs-cudagraph 代价——这是生产真实对比，但解读"纯 MTP 开销"时需注意。
+
+**问题 5：数据溯源核查（防污染）。** 发现 `start_server_isolated.py` 的"OFF 隔离服务器"配置里其实带着 `--speculative-config {spec=1, eager}`，是 MTP=1 服务器。为确认 OFF 侧数据没被污染，逐个压测时间窗口对照了全部服务器日志（launcher banner + 请求日志时间戳）：OFF 侧 c1/c8/c32（13:26-14:51）均由 13:22 启动的真正 OFF 服务器服务 ✓；MTP=1 侧 c1（12:46-13:12）由 isolate（spec=1）服务 ✓，c8/c32（15:15-15:18）由 `_srv_mtp1` 服务 ✓。**结论：六点数据的配置标签全部正确，无污染。**
+
+**问题 6：随机 token 输入压低了接受率。** `bench_serving.py` 的输入是随机 token ID 序列（`random.randint`），给模型喂乱码时 draft 命中率天然偏低。为此补了自然文本探针（16 个真实中英文提示词，temp=0）：接受率 16.64%，是随机输入的 3.5 倍，验证了偏差存在；但 16.64% 仍远低于回本线，不影响最终结论。
+
+### 五、经验教训
+
+- 代理产出的数据要抽查溯源：服务器日志（launcher 配置 + 请求时间窗）↔ 压测结果文件时间戳，二者对得上才算数。
+- 合成输入（随机 token）测出的指标要标注适用范围；关键结论尽量用真实分布复测一次。
+- 错误归因要读原始报错，不能只看表面现象（spec=2 的"量化不兼容"就是这样产生的）。
+- 远端受限 Notebook 的传输限制（命令截断、无 xxd、stdin 拒绝）要在第一次遇到时就固定成模式，避免反复试错。
+
+### 六、遗留问题
+
+- 生产采样分布（temp>0、真实流量）下的接受率 —— 需要线上流量或真实数据集复测。
+- c8 处 MTP=ON 降低 TTFT 的机制（疑似调度/图模式交互，vllm-ascend 侧）—— 如果未来要用这个特性，值得查一次源码。
+- 阶段 5（prefix caching / cudagraph / KV 量化 / GPQA 复测）与阶段 6（收尾报告）未开始。
 
 ---
 

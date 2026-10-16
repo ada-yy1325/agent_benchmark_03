@@ -1,4 +1,4 @@
-# 进度：阶段 0 + 1
+# 进度：阶段 0-4 完成，剩阶段 5/6
 恢复规则：先读本文件，产物存在且校验通过的步骤跳过，从第一个 [ ] 继续。
 
 ## 阶段 0 · 基线
@@ -30,9 +30,15 @@
 - [x] 1.7 git 提交+收尾 ✅        产物：git commit → GitHub（23 个结果 JSON + 3 个文档）
 
 ## 已知问题
-- 🔴 远程 GitHub 不可达 → 使用 base64+gzip 分片同步文件到远程
+- 🔴 远程 GitHub 不可达 → 使用 base64+gzip 分片同步文件到远程（注：2026-10-16 起远端 git fetch/pull 已恢复可用，可直接 git 同步）
 - 🟡 CANN 25.0.rc1.1 (vs 预期 9.0.0) — 待确认影响
 - ✅ NPU 显存采样 regex 已修复（npu-smi 的 HBM 行无 "MB" 后缀）
+- 🟡 inspire exec 传输限制（2026-10-16 摸清，阶段 5/6 注意）：
+  - `quant-test` 是受限 Notebook：无 SSH/SCP，exec 拒绝本地 stdin 管道
+  - 单条 exec 命令约 2049 字符处会被截断 → 传文件用 **hex 编码 + <1600 字符分块**，
+    `python3 -c "open('PATH','ab').write(bytes.fromhex('HEX'))"` 逐块追加（远端无 xxd，base64 会损坏）
+  - 从 python subprocess 调 inspire 时必须 `stdin=subprocess.DEVNULL`
+- ✅ MTP 在此栈上强制 enforce_eager=True（eager=False 启动即崩），非可调项
 
 ## 阶段 2 · 预填充调度优化（最高优先）
 - [x] 2.0 测量核实（显存/拓扑/MTP）   产物：env/recheck.json
