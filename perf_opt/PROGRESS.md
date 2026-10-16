@@ -48,18 +48,19 @@
   - ❌ 失败：模型加载阶段 crash，`shape '[0, 1024, -1]' is invalid`（DeepSeek-V4 架构不兼容 TP16）
   - 日志：_server_tp16.log — HCCL 16 卡初始化成功但模型加载失败
 - [x] 3.3 方案A/B DP2×TP8         产物：scripts/run_topo_dp2tp8.py → results/topo/dp2tp8/
-  - ❌ 失败：DP1 workers 全部 crash，`SetDevice error 507033`
-  - 根因：vllm-ascend NPUWorker._init_device 使用 self.local_rank 分配 NPU
-    单节点 DP 下 DP0 和 DP1 的 local_rank 都是 0-7，DP1 workers 尝试复用已被 DP0 占用的 NPU 0-7
-  - 尝试了 monkey-patch（start_server_topo.py）和直接 patch 系统包（worker.py:386
-    local_rank→rank），均未生效 — multi-processing spawn 模式下 monkey-patch 不继承
-  - 结论：vLLM-ascend v0.23.0 单节点 DP 设备分配 bug，无法在当前版本修复
-- [x] 3.4 DP4×TP4                 ❌ 跳过：VRAM临界(54.3/57.6GB)，c≤64场景边际收益低
-- [ ] 3.5 拓扑选型小结            产物：summary/topo_best.json
-  - 结论：DeepSeek-V4-Flash-w8a8 在 16×NPU-910B2C 单节点上，唯一可工作的拓扑是 TP=8
+  - ❌ 原生 DP 失败：vllm-ascend v0.23.0 单节点 DP 设备分配 bug (SetDevice error 507033)
+  - ✅ 两独立 TP8 服务器方案成功：ASCEND_RT_VISIBLE_DEVICES 隔离，c1/c8/c32/c64 全跑完
+  - 结论：唯一可行的 16 卡方案
+- [x] 3.4 方案D DP4×TP4             ❌ 跳过：VRAM OOM (TP4 需 ~75 GB/卡 > 64 GB HBM)，实测加载即爆
+- [x] 3.5 EP 专家并行核实           产物：probe_ep.py → EP 是附着在 TP/DP 上的开关，不是独立拓扑维度；所有配置已默认开启
+- [x] 3.6 拓扑选型小结              产物：summary/topo_best.json
+  - 结论：DeepSeek-V4-Flash-W8A8 在 16×NPU-910B2C 单节点上：
     - TP16：模型架构不兼容（shape error）
-    - DP2×TP8：vllm-ascend DP 设备分配 bug
-    - 最优化：TP=8 使用 8 卡（剩余 8 卡闲置），batched=8192, max-seqs=64
+    - DP2×TP8 原生：vllm-ascend DP 设备分配 bug → 不可行
+    - DP2×TP8 两服务器：唯一可行 16 卡方案，TP +27%（812.7 tok/s），TTFT 恶化
+    - DP4×TP4：OOM 不可行
+    - EP：已默认启用，非独立维度
+    - 生产建议：TP8×2 独立服务（非 DP pooling），剩余 8 卡独立部署
 
 ## 阶段 4 · MTP 投机解码
 - [ ] 4.1 MTP 状态/接受率核实

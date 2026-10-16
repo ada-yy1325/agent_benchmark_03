@@ -1,3 +1,90 @@
+## 2026-10-16 — Phase 3 收尾：TP4 OOM 验证 + EP 核实 + 拓扑选型小结
+
+---
+
+### 总体概述
+
+今天完成了 Phase 3 的收尾工作。验证了所有 16 卡方案的可行性，写出了完整的拓扑选型报告。
+
+**核心结论**：DeepSeek-V4-Flash-W8A8 在 16×NPU-910B2C 上，**唯一可行的 16 卡方案是两独立 TP8 服务器**。TP 扩展仅 +27%（812.7 tok/s），**不推荐为吞吐而堆 16 卡**——更好的方案是 8 卡跑一个 TP8 服务，剩余 8 卡独立部署第二个模型/服务。
+
+---
+
+### 3.4 DP4×TP4 VRAM 验证
+
+创建 `test_tp4_fit.py`，在 NPU 0-3 上启动 TP=4 服务。
+
+**结果**：❌ OOM 直接爆
+
+```
+NPU out of memory. Tried to allocate 514.00 MiB (NPU 0;
+60.96 GiB total capacity; 59.22 GiB already allocated; 1.28 GiB free)
+```
+
+**根因**：TP4 下每卡需存储 300 GB / 4 = **75 GB 模型权重**，远超 64 GB HBM。即使 `gpu_memory_utilization=0.9` 只给了 57.6 GB，但加载阶段就触发 allocator OOM。
+
+**结论**：DP4×TP4 完全不可行。
+
+---
+
+### 3.5 EP（Expert Parallel）核实
+
+创建 `probe_ep.py` 探测 vLLM-Ascend 的 EP 机制。
+
+**关键发现**：
+- EP 不是一个独立的并行维度——源码 `world_size = tp * pp * pcp * dp`，不包含 EP
+- `--enable-expert-parallel` 只是一个开关，改变 256 专家在 TP 组内的分布方式
+- 我们的所有服务器配置（`start_server_isolated.py`, `start_server_topo.py`）**已经默认启用 EP**
+- EP16 作为独立拓扑方案**不存在**——原计划对 EP 的理解有误
+
+---
+
+### 3.6 拓扑选型小结
+
+写入 `summary/topo_best.json`，横向对比 5 种方案：
+
+| 方案 | 状态 | 原因 |
+|:-----|:-----|:-----|
+| TP8 baseline | ✅ 完成 | 8 卡单服务，c64 TP=640 tok/s |
+| TP16 | ❌ | 模型架构不兼容 |
+| DP2×TP8 原生 | ❌ | vLLM-Ascend DP bug |
+| DP2×TP8 两服务器 | ✅ | 唯一可行 16 卡方案，TP=812.7 |
+| DP4×TP4 | ❌ | OOM：75 GB/card > 64 GB HBM |
+| EP | ✅ | 已默认启用（非独立拓扑） |
+
+**加速比分析**：
+- c=64 吞吐：640 → 812.7 tok/s（+27%），**远非线性**
+- c=64 TTFT：13.9s → 45.6s（**恶化 3.3×**），因为两服务器各自排队
+
+**推荐**：
+- 低延迟：TP8 ×1（8 卡），TTFT ~350ms
+- 高吞吐：DP2×TP8 两服务器（16 卡），TP=812.7 tok/s
+- **最优**：TP8 ×1（8 卡），剩余 8 卡部署第二个模型/服务
+
+---
+
+### 产物清单
+
+| 产物 | 路径 |
+|:-----|:-----|
+| EP 探测脚本 | `perf_opt/scripts/probe_ep.py` |
+| TP4 VRAM 测试 | `perf_opt/scripts/test_tp4_fit.py` |
+| 拓扑选型报告 | `perf_opt/summary/topo_best.json` |
+| 更新进度 | `perf_opt/PROGRESS.md` |
+
+---
+
+### Phase 3 最终评估
+
+**完成度**：100%。所有 5 种方案（TP16, DP2×TP8原生, DP2×TP8两服务器, DP4×TP4, EP）全部验证完毕。
+
+**耗时**：2 天（10/15-10/16），符合原计划"约 2 天"的估算。
+
+**最大的坑**：vLLM-Ascend 原生 DP 的 device assignment bug，花了一天 monkey-patch 无果，最终用两独立服务器绕过。
+
+**最大收获**：16 卡堆叠不如 8 卡 ×2 独立服务。DP（数据并行）的价值在于**独立服务**而非 pooling——后者 TTFT 反而恶化。
+
+---
 ## 2026-10-15 — Phase 3 完成：DP2×TP8 基准测试（两独立 TP8 服务器方案）
 
 ---

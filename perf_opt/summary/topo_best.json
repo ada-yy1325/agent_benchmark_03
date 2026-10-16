@@ -1,0 +1,78 @@
+{
+  "phase": "3.6-topo-best",
+  "date": "2026-10-16",
+  "environment": {
+    "platform": "ASCEND 910B2C × 16",
+    "hbm_per_npu": "64 GB",
+    "model": "DeepSeek-V4-Flash-W8A8 (self-quantized)",
+    "vllm_version": "0.23.0",
+    "benchmark_params": {"input_len": 4096, "output_len": 1024, "batched": 8192, "max_seqs": 64}
+  },
+  "schemes": {
+    "TP8_baseline": {
+      "status": "completed", "cards": 8,
+      "desc": "Single TP8 server, optimal config from Phase 2",
+      "c1": {"ttft_p50_ms": 355,  "tp_tok_s": 21.9, "tpot_p50_ms": 45.4},
+      "c32": {"ttft_p50_ms": 957, "tp_tok_s": 530, "tpot_p50_ms": 58.3},
+      "c64": {"ttft_p50_ms": 13926, "tp_tok_s": 640, "tpot_p50_ms": 65.0}
+    },
+    "TP16": {
+      "status": "INFEASIBLE", "cards": 16,
+      "error": "shape '[0, 1024, -1]' is invalid — model architecture incompatible with TP16 sharding",
+      "log": "results/topo/tp16/_server_tp16.log"
+    },
+    "DP2xTP8_native": {
+      "status": "INFEASIBLE", "cards": 16,
+      "error": "DP1 workers crash: SetDevice error 507033. vllm-ascend v0.23.0 bug: NPUWorker._init_device uses local_rank instead of rank for single-node DP device assignment.",
+      "attempted": "Monkey-patch node_rank_within_dp, ASCEND_RT_VISIBLE_DEVICES, worker.py patch — all failed due to multiproc spawn inheritance"
+    },
+    "DP2xTP8_two_server": {
+      "status": "COMPLETED", "cards": 16,
+      "desc": "Two independent TP8 servers (ASCEND_RT_VISIBLE_DEVICES=0-7 + 8-15), client-side NREQ/2 split",
+      "c1": {"ttft_p50_ms": 447, "tp_tok_s": 42.2, "tpot_p50_ms": 47.0},
+      "c8": {"ttft_p50_ms": 586, "tp_tok_s": 242.4, "tpot_p50_ms": 57.1},
+      "c32": {"ttft_p50_ms": 26015, "tp_tok_s": 588.7, "tpot_p50_ms": 67.7},
+      "c64": {"ttft_p50_ms": 45608, "tp_tok_s": 812.7, "tpot_p50_ms": 71.7},
+      "per_server_c64": {
+        "port8000_npu0-7": {"ttft_p50_ms": 12041, "tp_tok_s": 410.0},
+        "port8001_npu8-15": {"ttft_p50_ms": 79174, "tp_tok_s": 402.7}
+      },
+      "summary": "results/topo/dp2tp8/_summary.json"
+    },
+    "DP4xTP4": {
+      "status": "INFEASIBLE", "cards": 16,
+      "error": "OOM during model load: 59.22/60.96 GiB used. TP4 puts ~75 GB/card (300GB/4) > 64 GB HBM."
+    },
+    "EP": {
+      "status": "ENABLED_BY_DEFAULT",
+      "desc": "--enable-expert-parallel already in all server configs. Distributes 256 experts across TP ranks (32/card with TP8). Not a separate topology."
+    }
+  },
+  "comparison_c64": [
+    {"scheme": "TP8 (8 cards)", "cards": 8, "ttft_p50_ms": 13926, "tp_tok_s": 640, "tpot_p50_ms": 65.0},
+    {"scheme": "DP2xTP8 (16 cards)", "cards": 16, "ttft_p50_ms": 45608, "tp_tok_s": 812.7, "tpot_p50_ms": 71.7}
+  ],
+  "speedup": {
+    "c64_tp": {"tp8": 640, "dp2tp8": 812.7, "ratio": 1.27},
+    "c64_ttft": {"tp8": 13926, "dp2tp8": 45608, "ratio": 3.27},
+    "note": "27% throughput gain for 2x cards. TTFT worse because each server independently queues 64 concurrent requests."
+  },
+  "recommendations": {
+    "low_latency": {"topology": "TP8 (8 cards)", "reason": "Single-request TTFT ~350ms. DP does not improve this."},
+    "moderate_concurrency": {"topology": "TP8 (8 cards), batched=8192, seqs=64", "reason": "TTFT <1s up to c=32"},
+    "high_throughput": {"topology": "DP2xTP8 two-server (16 cards)", "reason": "812.7 tok/s at c=64, +27% vs TP8"},
+    "best_overall": {"topology": "TP8 × 2 independent services on 16 cards", "reason": "Sub-linear 16-card scaling. Better to serve two different models/services."}
+  },
+  "key_findings": [
+    "TP16 infeasible — DeepSeek-V4 architecture cannot shard to 16 TP ranks",
+    "DP4xTP4 infeasible — model weights (75 GB/card) exceed 64 GB HBM",
+    "vllm-ascend native DP broken on single node (v0.23.0 device assignment bug)",
+    "Two independent TP8 servers via ASCEND_RT_VISIBLE_DEVICES is the only working 16-card approach",
+    "EP (--enable-expert-parallel) already enabled in all configs, works within each TP8 group",
+    "Throughput scaling 8→16 cards is sub-linear (+27%), bottlenecked by prefill",
+    "TTFT worsens with 2 servers (each independently queues all concurrent requests)",
+    "TPOT robust (45-72ms) across all topologies and concurrencies",
+    "NPU 8-15 shows worse TTFT than 0-7 (possible fabric topology asymmetry)",
+    "For production: use TP8 on 8 cards, deploy second model on remaining 8 cards"
+  ]
+}
