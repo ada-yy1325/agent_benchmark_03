@@ -1,3 +1,56 @@
+## 2026-10-16 — Phase 4.1：MTP 接受率摸底（关键发现！）
+
+---
+
+### 总体概述
+
+在 MTP=1（spec=1，之前 Phase 0-3 所有 benchmark 的默认配置）下，跑了一次 c=1×32req 基准测试，从 `/metrics` 中抓取了推测解码的接受率。**结果显示接受率仅 ~4.73%**——这是一个重大发现！
+
+### 基准配置
+
+- 服务器：TP=8, MTP=1 (`num_speculative_tokens=1, enforce_eager=true`)
+- 基准：4K→1K tokens, c=1, 32 req, temp=0.0, seed=42
+- 持续时间：1529s（~25 min），100% 成功率
+
+### 基准结果
+
+| 指标 | 值 |
+|:-----|:---|
+| TTFT P50 | 356.54 ms |
+| TTFT P99 | 371.2 ms |
+| TPOT P50 | 46.14 ms |
+| TPOT P99 | 48.81 ms |
+| 输出吞吐 | 21.43 tok/s |
+| 总吞吐 | 107.15 tok/s |
+
+### MTP 推测解码指标
+
+| 指标 | Before | After | Delta |
+|:-----|:------|:------|:------|
+| Draft tokens | 14,360 | 49,069 | 34,709 |
+| Accepted tokens | 739 | 2,381 | 1,642 |
+| **接受率** | — | — | **4.73%** |
+
+### 发现解读
+
+- **接受率极低（~4.7%）**：每生成约 20 个 draft token 才被接受 1 个
+- MTP 将每个 decode step 的计算量翻倍（draft 模型 + 验证），但仅 5% 的 draft token 能加速
+- **初步结论：MTP=OFF 很可能比 MTP=ON 更快**——因为省去了 draft 模型计算，且无效 draft 的开销极大
+- 低接受率的原因可能包括：W8A8 量化影响、长文本生成（1K）、或 MTP head 训练不充分
+
+### 数据存储
+
+- 基准结果：`perf_opt/results/mtp/mtp_1/mtp1_probe_c1.json`
+- 指标历史：`/tmp/mtp1_metrics_before.txt`, `/tmp/mtp1_metrics_after.txt`
+- 汇总文件：`perf_opt/summary/mtp_acceptance.json`
+
+### 下一步
+
+- Phase 4.2：MTP=OFF 单变量对比（同配置、同基准）
+- 验证 `enforce_eager` 的作用域
+- 检查 spec=2 是否支持
+
+---
 ## 2026-10-16 — Phase 3 收尾：TP4 OOM 验证 + EP 核实 + 拓扑选型小结
 
 ---

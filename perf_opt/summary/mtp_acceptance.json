@@ -1,0 +1,41 @@
+{
+  "phase": "4.1-mtp-probe",
+  "summary": "MTP=1 acceptance rate probe against running TP8 server",
+  "date": "2026-10-16T13:11:57",
+  "server_config": {
+    "tp": 8,
+    "dp": 1,
+    "mtp": 1,
+    "batched": 8192,
+    "max_seqs": 64
+  },
+  "bench_params": {
+    "input_len": 4096,
+    "output_len": 1024,
+    "concurrency": 1,
+    "num_requests": 32,
+    "temperature": 0.0,
+    "seed": 42
+  },
+  "bench_results": {
+    "ttft_p50_ms": 356.54,
+    "ttft_p99_ms": 371.2,
+    "tpot_p50_ms": 46.14,
+    "tpot_p99_ms": 48.81,
+    "output_tok_s": 21.43,
+    "total_tok_s": 107.15,
+    "wall_time_s": 1529.04,
+    "ok": 32,
+    "total": 32
+  },
+  "spec_metrics": {
+    "draft_tokens_before": 14360,
+    "accepted_tokens_before": 739,
+    "draft_tokens_after": 49069,
+    "accepted_tokens_after": 2381,
+    "draft_tokens_delta": 34709,
+    "accepted_tokens_delta": 1642,
+    "acceptance_rate": 0.0473
+  },
+  "peak_hbm_mb_per_npu": [3430, 3423, 3431, 3429, 3427, 3424, 3427, 3423]
+}
