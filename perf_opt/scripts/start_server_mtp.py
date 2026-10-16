@@ -84,7 +84,7 @@ else:
     spec_cfg = {
         "num_speculative_tokens": n_spec,
         "method": "mtp",
-        "enforce_eager": args_cmd.enforce_eager,
+        "enforce_eager": True,
     }
     print(f"[launcher] MTP: spec={n_spec}, enforce_eager={args_cmd.enforce_eager}", flush=True)
     CLI_ARGS.extend([
