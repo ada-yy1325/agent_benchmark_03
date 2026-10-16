@@ -1,14 +1,3 @@
-## 阶段 4 · MTP 推测解码优化
-- [x] 4.1 MTP 接受率摸底 ✅            产物：perf_opt/summary/mtp_acceptance.json
-  - MTP=1 接受率：4.73%（极低！）
-  - c=1×32req: TTFT=356.54ms, TPOT=46.14ms, TP=21.43 tok/s
-  - 初步结论：MTP=OFF 可能比 MTP=ON 更快（节省 draft 模型计算，无效 draft 开销极大）
-- [x] 4.2 MTP=OFF 对比基准 ✅         产物：perf_opt/summary/mtp_comparison.json
-  - MTP=OFF 吞吐+2.4%, TPOT-1.8% — **MTP=OFF 比 ON 更快！**
-  - 根因：接受率 4.73% → draft 计算开销 > 收益
-  - 生产建议：关闭 MTP
-- [ ] 4.3 spec=2 vs spec=1 对比
-- [ ] 4.4 enforce_eager 作用域验证
 # 进度：阶段 0 + 1
 恢复规则：先读本文件，产物存在且校验通过的步骤跳过，从第一个 [ ] 继续。
 
@@ -74,9 +63,17 @@
     - 生产建议：TP8×2 独立服务（非 DP pooling），剩余 8 卡独立部署
 
 ## 阶段 4 · MTP 投机解码
-- [ ] 4.1 MTP 状态/接受率核实
-- [ ] 4.2 关/spec=1/更多 对比
-- [ ] 4.3 不同并发下净收益
+- [x] 4.1 MTP 状态/接受率核实   产物：env/mtp_status.json, summary/mtp_acceptance.json
+  - MTP 机制可用（spec=1），接受率：随机 token 4.35-4.73%，自然文本 16.64%（2026-10-16 审计补测）
+  - spec=2 启动失败：cudagraph shape 冲突（spec+1=3 与 TP=8 序列并行不互质），**非量化问题**
+  - MTP 在此栈上强制 enforce_eager=True（eager=False 启动即崩，12:08 日志为证）
+- [x] 4.2 关/spec=1/更多 对比   产物：summary/mtp_comparison.json
+  - OFF 比 ON 快 2.4%（c1）；spec=2 不可用（见 4.1）
+- [x] 4.3 不同并发下净收益     产物：summary/mtp_best.json（含 2026-10-16 审计版）
+  - off/1 × c1/c8/c32 六点齐全；c8 双侧重跑验证：ON TTFT 554-765ms vs OFF 1389-1421ms（方向稳定）
+  - 全并发下 ON 的 TPOT/吞吐均差于 OFF（-2.3% ~ -10%）
+  - 结论：生产用 MTP=OFF；若 c≈8 且重 TTFT 轻吞吐，MTP=ON 可选（TTFT 约减半，吞吐 -9%）
+- [x] 4.4 enforce_eager 作用域验证 ✅ 已并入 4.1 审计（MTP 必须 eager，无调整空间）
 
 ## 阶段 5 · 其他开关 + 精度复测
 - [ ] 5.1 prefix caching 对比

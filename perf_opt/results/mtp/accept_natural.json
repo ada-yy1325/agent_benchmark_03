@@ -1,0 +1,11 @@
+{
+  "phase": "4-audit-natural-text-acceptance",
+  "date": "2026-10-16T16:35:33.258045",
+  "wall_time_s": 170.9,
+  "requests_ok": 16,
+  "total_output_tokens": 4096,
+  "draft_tokens_delta": 3498.0,
+  "accepted_tokens_delta": 582.0,
+  "acceptance_rate": 0.16638078902229847,
+  "note": "natural text prompts, temp=0.0, greedy acceptance semantics; compare with random-token rate 4.35-4.73%"
+}

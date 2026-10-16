@@ -1,0 +1,48 @@
+{
+  "case_id": "mtp_off_probe",
+  "input_len": 4096,
+  "output_len": 1024,
+  "concurrency": 1,
+  "temperature": 0.0,
+  "ignore_eos": true,
+  "seed": 42,
+  "planned_requests": 32,
+  "successful_requests": 32,
+  "failed_requests": 0,
+  "wall_time_s": 1493.787,
+  "total_input_tokens": 131072,
+  "total_output_tokens": 32768,
+  "output_tokens_per_s": 21.94,
+  "total_tokens_per_s": 109.68,
+  "ttft_ms": {
+    "p50": 360.3,
+    "p90": 373.1,
+    "p99": 419.98,
+    "mean": 355.94
+  },
+  "tpot_ms": {
+    "p50": 45.3,
+    "p90": 46.2,
+    "p99": 46.55,
+    "mean": 45.27
+  },
+  "e2e_ms": {
+    "p50": 46690.67,
+    "p99": 47978.28
+  },
+  "success_rate": 1.0,
+  "peak_hbm_mb_per_npu": [
+    3430,
+    3423,
+    3431,
+    3429,
+    3427,
+    3424,
+    3427,
+    3423
+  ],
+  "avg_output_tokens_per_request": 1024.0,
+  "fallback_to_text": false,
+  "timestamp": "2026-10-16T13:50:54.219217",
+  "errors": []
+}

@@ -1,3 +1,48 @@
+## 2026-10-16 — Phase 4.3 收尾 + 全量审计（复核 Cline 结论）
+
+---
+
+### 关键结论（审计后）
+
+**MTP=OFF 维持生产推荐，但 Cline 的数据有两处需要修正，一处需要标注。**
+
+### 审计动作与结果
+
+| 项目 | Cline 原结论 | 审计结果 |
+|:-----|:-------------|:---------|
+| 接受率 4.73% | 极低，MTP 无用 | ✅ 测量方法正确（/metrics 计数器差值）。但仅在随机 token 输入下成立；**自然文本上为 16.64%**（16 请求实测）。仍远低于 MTP 回本所需的 60-85% |
+| c8 TTFT 异常（ON 比 OFF 低 46%） | "异常，需复现" | ✅ **已复核为真实现象**：OFF c8 复测 1389.5ms（原 1420.6），ON c8 复测 554.2ms（原 765.2）。方向稳定，ON 的 TTFT 约为 OFF 的 40%；ON 侧数值本身波动大（554 vs 765） |
+| spec=2 不支持 | 归因"W8A8 量化不兼容" | ❌ **归因错误**。真实原因：`ValueError: Can't determine cudagraph shapes... multiple of 3 (num_speculative_tokens + 1)... and 8 (tensor_parallel_size)` — spec+1=3 与 TP=8 序列并行不互质。报错原文提示可"关闭序列并行"解开。与量化无关。但接受率过低，不值得去解 |
+| MTP 强制 eager | （Cline 的修复动作） | ✅ 必要且无解：eager=False 的 MTP 服务器 NPUModelRunner 初始化即崩（12:08 日志）。因此 ON-vs-OFF 对比包含 eager-vs-cudagraph 代价，是生产真实对比 |
+
+### 验证后的净收益表（4K→1K, 32req, temp=0）
+
+| 并发 | 指标 | OFF | MTP=1 | MTP=1 相对 |
+|:-----|:-----|:----|:------|:-----------|
+| c1 | 吞吐 tok/s | 21.94 | 21.43 | -2.3% |
+| c8 | TTFT p50 | 1389.5ms | 554.2ms | **-60%** ✅ 已验证 |
+| c8 | 吞吐 tok/s | 176.14 | 160.02 | -9.2% |
+| c32 | 吞吐 tok/s | 557.66 | 506.01 | -9.3% |
+
+### 最终配置
+
+- **生产（吞吐优先）：MTP=OFF**，TP8/DP1/batched 8192/max_seqs 64，其余同阶段 2/3 最优配置
+- **可选场景**：并发≈8 且首字延迟比吞吐重要时，MTP=ON 可把 TTFT 约减半（代价 ~9% 吞吐）
+- spec=2 不支持（shape 冲突），接受率条件下也无意义
+
+### 数据
+
+- `summary/mtp_best.json`（审计版）、`env/mtp_status.json`、`results/mtp/accept_natural.json`
+- `results/mtp/mtp_{off,1}/mtp_{off,1}_probe_c8.json`（16:17/16:28 复核版）
+- 复核日志：`results/mtp/_srv_verify_1.log` / `_srv_verify_off.log`（远端）
+
+### 遗留
+
+- 生产采样分布（temp>0、真实流量）下的接受率
+- c8 处 MTP 降低 TTFT 的机制（疑似调度/图模式交互，vllm-ascend 侧）
+
+---
+
 ## 2026-10-16 — Phase 4.2：MTP=OFF vs ON 对比（确认 MTP 拖慢性能）
 
 ---

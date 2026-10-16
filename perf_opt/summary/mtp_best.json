@@ -1,0 +1,70 @@
+{
+  "phase": "4.3-mtp-net-benefit",
+  "date": "2026-10-16",
+  "audited": true,
+  "audit_note": "2026-10-16 independent re-verification: c8 pair re-run on fresh servers, acceptance re-measured at c8 and on natural text, spec=2 failure cause corrected. All numbers below are the verified values.",
+  "fixed_config": {
+    "tp": 8, "dp": 1, "batched": 8192, "max_seqs": 64,
+    "model": "DeepSeek-V4-Flash-W8A8", "npu": "910B2C x8",
+    "bench_params": {"input_len": 4096, "output_len": 1024, "num_requests": 32, "seed": 42, "temp": 0.0},
+    "prompt_type": "random token ids (synthetic)"
+  },
+
+  "mtp_off": {
+    "c1":  {"ttft_p50": 360.3,  "tpot_p50": 45.3,  "tok_s": 21.94,  "wall_s": 1493.79},
+    "c8":  {"ttft_p50": 1389.51,"tpot_p50": 44.03, "tok_s": 176.14, "wall_s": 186.04, "verified": "2026-10-16 rerun, matches original 1420.63/44.09/175.8"},
+    "c32": {"ttft_p50": 4844.2, "tpot_p50": 52.32, "tok_s": 557.66, "wall_s": 58.76}
+  },
+
+  "mtp_spec1": {
+    "acceptance_rate_random_tokens": 0.0473,
+    "acceptance_rate_random_tokens_c8": 0.0435,
+    "acceptance_rate_natural_text": 0.1664,
+    "acceptance_note": "4.73% (c1) / 4.35% (c8) on random-token prompts; 16.64% on natural text (16 requests, temp=0). Even 16.6% is far below the 60-85% needed for MTP to pay off on this stack.",
+    "c1":  {"ttft_p50": 356.54, "tpot_p50": 46.14, "tok_s": 21.43,  "wall_s": 1529.04},
+    "c8":  {"ttft_p50": 554.2,  "tpot_p50": 48.38, "tok_s": 160.02, "wall_s": 204.78, "verified": "2026-10-16 rerun; direction confirmed but value varies (554 vs 765 in two runs)"},
+    "c32": {"ttft_p50": 5304.4, "tpot_p50": 56.53, "tok_s": 506.01, "wall_s": 64.76}
+  },
+
+  "mtp_spec2": {
+    "status": "unsupported (as shipped)",
+    "detail": "Server crashes at model load: ValueError: Can't determine cudagraph shapes that are both a multiple of 3 (num_speculative_tokens + 1) required by spec-decode and 8 (tensor_parallel_size) required by sequence parallelism. NOT a quantization issue (Cline's earlier attribution was wrong). Fixable in principle via --disable-sequence-parallel, but pointless: acceptance is too low for spec=2 to help."
+  },
+
+  "constraints": {
+    "mtp_forces_eager": "MTP on this stack requires enforce_eager=True; with eager=False the NPUModelRunner crashes at init (verified from 12:08 server log). So the ON-vs-OFF comparison includes the eager-vs-cudagraph penalty — it is the production-realistic comparison, not a pure MTP cost.",
+    "prompt_dependency": "Acceptance depends strongly on prompt type: 4.4-4.7% (random tokens) vs 16.6% (natural text). Performance runs all used random tokens; relative ON-vs-OFF comparison remains fair since both arms used identical prompts."
+  },
+
+  "net_benefit": {
+    "formula": "(mtp_on - mtp_off) / mtp_off × 100%, positive = MTP=ON worse",
+    "c1": {
+      "ttft_pct": -1.0,  "tpot_pct": 1.9,   "tok_s_pct": -2.3,  "wall_pct": 2.4,
+      "verdict": "MTP=OFF slightly better (throughput +2.4%), TTFT negligible difference"
+    },
+    "c8": {
+      "ttft_pct": -60.1, "tpot_pct": 9.9,   "tok_s_pct": -9.2,  "wall_pct": 10.1,
+      "verdict": "VERIFIED: MTP=ON cuts TTFT roughly in half at c8 (554 vs 1389 ms, direction stable across two runs) but loses 9-10% throughput/TPOT. Genuine trade-off, not noise."
+    },
+    "c32": {
+      "ttft_pct": 9.5,   "tpot_pct": 8.0,   "tok_s_pct": -9.3,  "wall_pct": 10.2,
+      "verdict": "MTP=OFF better across all metrics at high concurrency"
+    }
+  },
+
+  "conclusion": {
+    "recommendation": "MTP=OFF for production (throughput-optimized scenarios)",
+    "rationale": "Acceptance rate is 4.4-4.7% on synthetic and 16.6% on natural text — far too low for MTP to amortize its overhead (plus this stack forces eager mode with MTP). ON loses 2.4-10% throughput at every measured concurrency.",
+    "c8_exception": "At c=8 MTP=ON delivers ~2.5x lower TTFT (554 vs 1389 ms, verified) at the cost of ~9% throughput. If a deployment cares about first-token latency at moderate concurrency (c≈8) more than throughput, MTP=ON is a legitimate option. Treat the exact TTFT value with caution: two ON runs gave 554 and 765 ms.",
+    "spec2_status": "Unsupported as shipped (cudagraph shape conflict with TP=8 sequence parallelism); not worth enabling given low acceptance.",
+    "final_config": {
+      "mtp": "off",
+      "tp": 8, "dp": 1, "batched": 8192, "max_seqs": 64,
+      "served_model": "dsv4", "quantization": "ascend"
+    },
+    "left_open": [
+      "acceptance under production sampling (temp>0, real traffic distribution)",
+      "c8 TTFT mechanism: why MTP lowers prefill-visible TTFT — worth one vllm-ascend scheduler investigation if the c8 TTFT gain matters"
+    ]
+  }
+}
