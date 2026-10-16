@@ -70,6 +70,12 @@ def run_bench(port, concurrency, case_id, out_file):
         return None, elapsed
     print(f"  [{case_id}] OK ({elapsed:.0f}s)", flush=True)
     try:
+        with open(out_file) as f:
+            return json.load(f), elapsed
+    except Exception as e:
+        print(f"  [{case_id}] Read error: {e}", flush=True)
+        return None, elapsed
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, required=True)
