@@ -1,0 +1,59 @@
+{
+  "name": "5_0_baseline",
+  "timestamp": "2026-10-19 12:52:10",
+  "cases": {
+    "c1_4k": {
+      "ttft_p50": 363.57,
+      "tpot_p50": 45.54,
+      "tok_s": 21.82,
+      "ok": 16,
+      "total": 16,
+      "wall_s": 758.9,
+      "expected_wall_s": 750.9,
+      "drift_pct": 1.06,
+      "self_consistent": true
+    },
+    "c8_4k": {
+      "ttft_p50": 1218.08,
+      "tpot_p50": 44.77,
+      "tok_s": 174.18,
+      "ok": 64,
+      "total": 64,
+      "wall_s": 384.6,
+      "expected_wall_s": 376.3,
+      "drift_pct": 2.17,
+      "self_consistent": true
+    },
+    "c32_4k": {
+      "ttft_p50": 1969.35,
+      "tpot_p50": 54.96,
+      "tok_s": 560.43,
+      "ok": 128,
+      "total": 128,
+      "wall_s": 242.1,
+      "expected_wall_s": 233.9,
+      "drift_pct": 3.4,
+      "self_consistent": true
+    },
+    "c64_4k": {
+      "ttft_p50": 2400.32,
+      "tpot_p50": 64.95,
+      "tok_s": 946.82,
+      "ok": 128,
+      "total": 128,
+      "wall_s": 146.8,
+      "expected_wall_s": 138.4,
+      "drift_pct": 5.7,
+      "self_consistent": true
+    }
+  },
+  "config": {
+    "mtp": "off",
+    "prefix_caching": false,
+    "graph_mode": "cudagraph",
+    "cpu_binding": true,
+    "dsa_cp": true,
+    "multistream_overlap": true,
+    "static_kernel": false
+  }
+}
