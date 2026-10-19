@@ -90,13 +90,28 @@
 - [x] 4.4 enforce_eager 作用域验证 ✅ 已并入 4.1 审计（MTP 必须 eager，无调整空间）
 
 ## 阶段 5 · 其他开关 + 精度复测
-- [ ] 5.1 prefix caching 对比
-- [ ] 5.2 cudagraph / eager 对比
-- [ ] 5.3 additional config 逐项
-- [ ] 5.4 KV cache 量化
-- [ ] 5.5 GPQA 精度复测
+- [ ] 5.0 基线复核（MTP=OFF 单组 TP8EP8 当轮 OFF 全套） 产物：results/extra/baseline/
+- [ ] 5.1 prefix caching（含公共前缀专用负载）          产物：results/extra/prefix/
+- [ ] 5.2 cudagraph / eager / npugraph 对比            产物：results/extra/graph/
+- [ ] 5.3 additional config 逐项单变量                 产物：results/extra/add/
+- [ ] 5.4 KV cache 量化快速止损复测                    产物：results/extra/kv_blocked.md
+- [ ] 5.5 数值一致性检查 + 最终配置 GPQA 全量复测      产物：results/extra/gpqa_final.json
 
 ## 阶段 6 · 收尾
-- [ ] 6.1 配置-性能总表
-- [ ] 6.2 低延迟/高吞吐推荐配置
-- [ ] 6.3 最终报告 + git 收尾
+- [ ] 6.1 配置-性能总表（基线→各阶段→最终）           产物：summary/final_report_table.*
+- [ ] 6.2 低延迟/高吞吐两套推荐配置（含 MTP 可选说明） 产物：summary/recommended_configs.md
+- [ ] 6.3 /tmp 产物归集（git/共享盘）                  产物：git commit、目录核对
+- [ ] 6.4 最终报告 + git tag 收尾                     产物：summary/final_report.md、tag
+
+### 统一对照压测点（阶段 5 全程冻结）
+| case | input | output | concurrency | num_requests |
+|------|-------|--------|-------------|-------------|
+| c1_4k  | 4096 | 1024 | 1  | 16  |
+| c8_4k  | 4096 | 1024 | 8  | 64  |
+| c32_4k | 4096 | 1024 | 32 | 128 |
+| c64_4k | 4096 | 1024 | 64 | 128 |
+
+### 基础设施
+- 灵活启动脚本：`scripts/start_server_phase5.py`（支持 --mtp/--prefix-caching/--graph-mode/--cpu-binding 等全部开关）
+- 编排脚本：`scripts/run_phase5.py`（--step 5.0/5.1/5.2/5.3，顺序执行+自洽校验，结果写 /tmp/phase5/）
+- 压测脚本：`scripts/bench_serving.py`（沿用，含 NPU 采样 regex 修复 + usage 精确计数）
