@@ -1,0 +1,98 @@
+{
+  "name": "5_1_prefix",
+  "timestamp": "2026-10-19 13:49:48",
+  "cases": {
+    "prefix_off": {
+      "c1_4k": {
+        "ttft_p50": 367.48,
+        "tpot_p50": 45.8,
+        "tok_s": 21.75,
+        "ok": 16,
+        "total": 16,
+        "wall_s": 761.4,
+        "expected_wall_s": 753.3,
+        "drift_pct": 1.07,
+        "self_consistent": true
+      },
+      "c8_4k": {
+        "ttft_p50": 1220.41,
+        "tpot_p50": 44.83,
+        "tok_s": 173.65,
+        "ok": 64,
+        "total": 64,
+        "wall_s": 385.9,
+        "expected_wall_s": 377.4,
+        "drift_pct": 2.2,
+        "self_consistent": true
+      },
+      "c32_4k": {
+        "ttft_p50": 1984.31,
+        "tpot_p50": 54.92,
+        "tok_s": 559.61,
+        "ok": 128,
+        "total": 128,
+        "wall_s": 242.6,
+        "expected_wall_s": 234.2,
+        "drift_pct": 3.45,
+        "self_consistent": true
+      },
+      "c64_4k": {
+        "ttft_p50": 2392.16,
+        "tpot_p50": 64.72,
+        "tok_s": 948.36,
+        "ok": 128,
+        "total": 128,
+        "wall_s": 146.6,
+        "expected_wall_s": 138.2,
+        "drift_pct": 5.72,
+        "self_consistent": true
+      }
+    },
+    "prefix_on": {
+      "c1_4k": {
+        "ttft_p50": 377.81,
+        "tpot_p50": 45.48,
+        "tok_s": 21.82,
+        "ok": 16,
+        "total": 16,
+        "wall_s": 758.7,
+        "expected_wall_s": 750.9,
+        "drift_pct": 1.03,
+        "self_consistent": true
+      },
+      "c8_4k": {
+        "ttft_p50": 1165.26,
+        "tpot_p50": 44.57,
+        "tok_s": 174.51,
+        "ok": 64,
+        "total": 64,
+        "wall_s": 383.9,
+        "expected_wall_s": 375.5,
+        "drift_pct": 2.18,
+        "self_consistent": true
+      },
+      "c32_4k": {
+        "ttft_p50": 1825.44,
+        "tpot_p50": 54.32,
+        "tok_s": 567.41,
+        "ok": 128,
+        "total": 128,
+        "wall_s": 239.3,
+        "expected_wall_s": 231.0,
+        "drift_pct": 3.47,
+        "self_consistent": true
+      },
+      "c64_4k": {
+        "ttft_p50": 2236.81,
+        "tpot_p50": 63.83,
+        "tok_s": 961.19,
+        "ok": 128,
+        "total": 128,
+        "wall_s": 144.7,
+        "expected_wall_s": 136.4,
+        "drift_pct": 5.76,
+        "self_consistent": true
+      }
+    }
+  }
+}
