@@ -38,14 +38,22 @@
   - 单条 exec 命令约 2049 字符处会被截断 → 传文件用 **hex 编码 + <1600 字符分块**，
     `python3 -c "open('PATH','ab').write(bytes.fromhex('HEX'))"` 逐块追加（远端无 xxd，base64 会损坏）
   - 从 python subprocess 调 inspire 时必须 `stdin=subprocess.DEVNULL`
+  - 后台任务要用 `setsid nohup ... &` 且日志重定向目录要先 mkdir，否则进程随 exec 终端被回收
 - ✅ MTP 在此栈上强制 enforce_eager=True（eager=False 启动即崩），非可调项
+- 🟡 **共享盘配额已满**（2026-10-19，项目目录 1.7T，主要在 models/）：远端写文件改用容器本地 /tmp；
+  后续需清理 models/ 中间量化产物（w8a8-mtp/mtp-resume/npu16 等）——删数据需用户确认
+- 🟡 **TTFT 测量依赖请求量**（2026-10-19 清洗会话确认）：32req vs 128req 的 c32 TTFT p50 差 2.6 倍；
+  跨日/跨节点还有 ~2 倍残余差异。延迟对比必须固定请求量约定 + 同一会话背靠背
 
 ## 阶段 2 · 预填充调度优化（最高优先）
 - [x] 2.0 测量核实（显存/拓扑/MTP）   产物：env/recheck.json
 - [x] 2.1 chunked prefill 状态      产物：results/sched/chunk_status.md
 - [x] 2.2 扫 max-num-batched-tokens  产物：results/sched/bat_scan/ (8/8, 最优=8192, 即是基线)
 - [x] 2.3 扫 max-num-seqs           产物：results/sched/seqs_scan/ (clean, 最优=64 → c64 TTFT 62.7s→2.5s, 25× ↓)
-- [x] 2.4 组合验证 c=32/48/64       产物：results/sched/final/ ⚠️ 该批数据被并发压测污染（wall 虚高 3.5-4×），TTFT 数字勿引用；吞吐可参考（c32=530, c48=564, c64=640 tok/s）；c64 正式 TTFT 以 2.3 的 2522ms 为准（见 2026-10-16 全量复核）
+- [x] 2.4 组合验证 c=32/48/64       产物：results/sched/final/ ⚠️ 该批数据被并发压测污染（wall 虚高 3.5-4×）
+  - ✅ 2026-10-19 清洗会话重测（results/clean_final/，全部自洽）：c32(128req)=1972ms/569 tok/s,
+    c48(128req)=2300.8ms/708 tok/s, c64(128req)=2292.7ms/965 tok/s —— 正式数字以此为准
+  - 另发现 c32(32req)=5111.6ms：**TTFT p50 依赖请求量（2.6×）**，跨阶段延迟对比必须固定请求量
 - [x] 2.5 调度最优配置小结          产物：summary/sched_best.json
 
 ## 阶段 3 · 并行拓扑（用满 16 卡）

@@ -36,6 +36,28 @@
     "prompt_dependency": "Acceptance depends strongly on prompt type: 4.4-4.7% (random tokens) vs 16.6% (natural text). Performance runs all used random tokens; relative ON-vs-OFF comparison remains fair since both arms used identical prompts."
   },
 
+  "clean_session_2026_10_19": {
+    "note": "Same-session back-to-back MTP off vs on (results/clean_final/). All points wall-vs-throughput self-consistent. Request count matters for TTFT, so both 32req and 128req were run.",
+    "c8_32req": {
+      "off": {"ttft_p50": 1390.1, "tpot_p50": 44.0, "tok_s": 176.3},
+      "on":  {"ttft_p50": 621.0,  "tpot_p50": 48.1, "tok_s": 161.5},
+      "delta": "TTFT -55.3% (ON wins big), throughput -8.4%"
+    },
+    "c32_32req": {
+      "off": {"ttft_p50": 5111.6, "tpot_p50": 51.7, "tok_s": 561.2},
+      "on":  {"ttft_p50": 5046.1, "tpot_p50": 56.7, "tok_s": 506.2},
+      "delta": "TTFT -1.3% (tie), throughput -9.8%"
+    },
+    "c32_128req": {
+      "off": {"ttft_p50": 1972.2, "tpot_p50": 54.0, "tok_s": 569.3},
+      "on":  {"ttft_p50": 1355.6, "tpot_p50": 58.3, "tok_s": 525.2},
+      "delta": "TTFT -31.3% (ON wins), throughput -7.8%"
+    },
+    "acceptance_rate": 0.0459,
+    "acceptance_note": "Fourth independent measurement (4.35/4.59/4.73% on random tokens, 16.64% natural text). Low acceptance confirmed.",
+    "pattern": "MTP=ON TTFT benefit appears only with deeper queues (c8 32req: -55%; c32 128req: -31%) and vanishes in shallow-queue high-concurrency (c32 32req: tie). Throughput loss -8 to -10% everywhere."
+  },
+
   "net_benefit": {
     "formula": "(mtp_on - mtp_off) / mtp_off × 100%, positive = MTP=ON worse",
     "c1": {
@@ -55,7 +77,7 @@
   "conclusion": {
     "recommendation": "MTP=OFF for production (throughput-optimized scenarios)",
     "rationale": "Acceptance rate is 4.4-4.7% on synthetic and 16.6% on natural text — far too low for MTP to amortize its overhead (plus this stack forces eager mode with MTP). ON loses 2.4-10% throughput at every measured concurrency.",
-    "c8_exception": "At c=8 MTP=ON delivers ~2.5x lower TTFT (554 vs 1389 ms, verified) at the cost of ~9% throughput. If a deployment cares about first-token latency at moderate concurrency (c≈8) more than throughput, MTP=ON is a legitimate option. Treat the exact TTFT value with caution: two ON runs gave 554 and 765 ms.",
+    "c8_exception": "VERIFIED in clean session (2026-10-19): at c=8 MTP=ON delivers TTFT 621ms vs OFF 1390ms (-55%) at the cost of ~8% throughput. The benefit also appears at c32 with deep queues (128req: -31%) but vanishes at c32 with shallow queues (32req: tie). If a deployment cares about first-token latency at c~8 (or deep-queue c32), MTP=ON is a legitimate option.",
     "spec2_status": "Unsupported as shipped (cudagraph shape conflict with TP=8 sequence parallelism); not worth enabling given low acceptance.",
     "final_config": {
       "mtp": "off",

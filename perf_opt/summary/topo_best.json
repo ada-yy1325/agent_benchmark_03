@@ -8,7 +8,7 @@
     "vllm_version": "0.23.0",
     "benchmark_params": {"input_len": 4096, "output_len": 1024, "batched": 8192, "max_seqs": 64}
   },
-  "audit_note": "2026-10-16 audit: TTFT values below are NOT comparable across days (cross-day drift 2-5x at c>=8; see logbook 2026-10-16 阶段0-4全量复核). Throughput verdicts are reliable. TP8 c64 TTFT should read 2522ms (clean phase-2 scan), not 13926ms (contaminated final run). Two-server c32/c64 TTFT values are unreliable (per-server 6.6x imbalance at c64).",
+  "audit_note": "2026-10-19 clean session (results/clean_final/) resolved the TTFT issues: (1) TTFT p50 depends on request count (32req vs 128req changes p50 2.6x at c32) - Cline compared across request counts without noticing; (2) two-server imbalance was a client-side artifact, clean per-server measurement is balanced (<2%); (3) cross-day node differences add ~2x residual on TTFT at c>=8. Throughput verdicts were always reliable. Use clean_session_2026_10_19 numbers for any latency comparison.",
   "schemes": {
     "TP8_baseline": {
       "status": "completed", "cards": 8,
@@ -32,11 +32,28 @@
       "desc": "Two independent TP8 servers (ASCEND_RT_VISIBLE_DEVICES=0-7 + 8-15), client-side NREQ/2 split",
       "c1": {"ttft_p50_ms": 447, "tp_tok_s": 42.2, "tpot_p50_ms": 47.0},
       "c8": {"ttft_p50_ms": 586, "tp_tok_s": 242.4, "tpot_p50_ms": 57.1},
-      "c32": {"ttft_p50_ms": 26015, "tp_tok_s": 588.7, "tpot_p50_ms": 67.7, "ttft_reliability": "UNRELIABLE - cross-day drift + possible client-side split issues; throughput ok"},
+      "c32": {"ttft_p50_ms": 26015, "tp_tok_s": 588.7, "tpot_p50_ms": 67.7, "ttft_reliability": "UNRELIABLE - see audit_note; throughput ok"},
       "c64": {"ttft_p50_ms": 45608, "tp_tok_s": 812.7, "tpot_p50_ms": 71.7, "ttft_reliability": "UNRELIABLE - see audit_note; throughput ok"},
+      "clean_session_2026_10_19": {
+        "method": "per-server independent benches (64req each), both self-consistent",
+        "c32_64req_each": {
+          "dp0": {"ttft_p50": 2444.1, "tpot_p50": 54.4, "tok_s": 563.4},
+          "dp1": {"ttft_p50": 2455.1, "tpot_p50": 54.3, "tok_s": 564.1},
+          "aggregate_tok_s": 1127.5, "balance_ttft_delta_pct": 0.45,
+          "vs_single_server": "single TP8 c32(128req)=569.3 tok/s, ttft 1972ms -> 2x throughput (+98%), ttft +24%"
+        },
+        "c64_64req_each": {
+          "dp0": {"ttft_p50": 8904.3, "tpot_p50": 58.4, "tok_s": 944.0},
+          "dp1": {"ttft_p50": 9043.8, "tpot_p50": 58.5, "tok_s": 941.0},
+          "aggregate_tok_s": 1885.0, "balance_ttft_delta_pct": 1.6,
+          "vs_single_server": "single TP8 c64(128req)=964.9 tok/s, ttft 2292.7ms -> 1.95x throughput, ttft +3.9x"
+        },
+        "verdict": "Earlier 6.6x per-server TTFT imbalance was a measurement artifact (client-side split). Clean measurement: balanced (<2%), near-perfect throughput scaling (1.95-2.0x)."
+      },
       "per_server_c64": {
         "port8000_npu0-7": {"ttft_p50_ms": 12041, "tp_tok_s": 410.0},
-        "port8001_npu8-15": {"ttft_p50_ms": 79174, "tp_tok_s": 402.7}
+        "port8001_npu8-15": {"ttft_p50_ms": 79174, "tp_tok_s": 402.7},
+        "note": "10-16 contaminated measurement; superseded by clean_session_2026_10_19"
       },
       "summary": "results/topo/dp2tp8/_summary.json"
     },

@@ -1,0 +1,48 @@
+{
+  "case_id": "mtp1_c8_32req",
+  "input_len": 4096,
+  "output_len": 1024,
+  "concurrency": 8,
+  "temperature": 0.0,
+  "ignore_eos": true,
+  "seed": 42,
+  "planned_requests": 32,
+  "successful_requests": 32,
+  "failed_requests": 0,
+  "wall_time_s": 202.862,
+  "total_input_tokens": 131072,
+  "total_output_tokens": 32768,
+  "output_tokens_per_s": 161.53,
+  "total_tokens_per_s": 807.64,
+  "ttft_ms": {
+    "p50": 620.99,
+    "p90": 2022.69,
+    "p99": 2403.85,
+    "mean": 902.81
+  },
+  "tpot_ms": {
+    "p50": 48.12,
+    "p90": 49.17,
+    "p99": 51.73,
+    "mean": 48.22
+  },
+  "e2e_ms": {
+    "p50": 49848.71,
+    "p99": 54097.82
+  },
+  "success_rate": 1.0,
+  "peak_hbm_mb_per_npu": [
+    3412,
+    3411,
+    3411,
+    3411,
+    3412,
+    3411,
+    3411,
+    3411
+  ],
+  "avg_output_tokens_per_request": 1024.0,
+  "fallback_to_text": false,
+  "timestamp": "2026-10-19T11:20:00.127797",
+  "errors": []
+}

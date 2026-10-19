@@ -1,0 +1,182 @@
+{
+  "started": "2026-10-19 10:58:18",
+  "node": "quant-test--d795c9ae7e1e-zv5mqluta7",
+  "A_mtp_off": {
+    "c8_32req": {
+      "ttft_p50": 1390.12,
+      "ttft_p90": 2200.69,
+      "ttft_mean": 1389.29,
+      "tpot_p50": 44.0,
+      "tok_s": 176.26,
+      "wall_s": 185.903,
+      "expected_wall_s": 185.9,
+      "drift_pct": -0.0,
+      "succ": 32,
+      "total": 32,
+      "self_consistent": true
+    },
+    "c32_32req": {
+      "ttft_p50": 5111.62,
+      "ttft_p90": 8070.77,
+      "ttft_mean": 4852.68,
+      "tpot_p50": 51.73,
+      "tok_s": 561.21,
+      "wall_s": 58.388,
+      "expected_wall_s": 58.4,
+      "drift_pct": -0.0,
+      "succ": 32,
+      "total": 32,
+      "self_consistent": true
+    },
+    "c32_128req": {
+      "ttft_p50": 1972.21,
+      "ttft_p90": 5713.1,
+      "ttft_mean": 2616.48,
+      "tpot_p50": 53.97,
+      "tok_s": 569.32,
+      "wall_s": 230.225,
+      "expected_wall_s": 230.2,
+      "drift_pct": -0.0,
+      "succ": 128,
+      "total": 128,
+      "self_consistent": true
+    },
+    "c48_128req": {
+      "ttft_p50": 2300.78,
+      "ttft_p90": 9488.25,
+      "ttft_mean": 3746.95,
+      "tpot_p50": 59.63,
+      "tok_s": 708.29,
+      "wall_s": 185.055,
+      "expected_wall_s": 185.1,
+      "drift_pct": 0.0,
+      "succ": 128,
+      "total": 128,
+      "self_consistent": true
+    },
+    "c64_128req": {
+      "ttft_p50": 2292.7,
+      "ttft_p90": 12822.65,
+      "ttft_mean": 5149.37,
+      "tpot_p50": 63.46,
+      "tok_s": 964.88,
+      "wall_s": 135.843,
+      "expected_wall_s": 135.8,
+      "drift_pct": 0.0,
+      "succ": 128,
+      "total": 128,
+      "self_consistent": true
+    }
+  },
+  "B_mtp1": {
+    "c8_32req": {
+      "ttft_p50": 620.99,
+      "ttft_p90": 2022.69,
+      "ttft_mean": 902.81,
+      "tpot_p50": 48.12,
+      "tok_s": 161.53,
+      "wall_s": 202.862,
+      "expected_wall_s": 202.9,
+      "drift_pct": 0.0,
+      "succ": 32,
+      "total": 32,
+      "self_consistent": true
+    },
+    "c32_32req": {
+      "ttft_p50": 5046.05,
+      "ttft_p90": 8374.15,
+      "ttft_mean": 5121.5,
+      "tpot_p50": 56.71,
+      "tok_s": 506.15,
+      "wall_s": 64.74,
+      "expected_wall_s": 64.7,
+      "drift_pct": 0.0,
+      "succ": 32,
+      "total": 32,
+      "self_consistent": true
+    },
+    "c32_128req": {
+      "ttft_p50": 1355.56,
+      "ttft_p90": 5958.43,
+      "ttft_mean": 2161.2,
+      "tpot_p50": 58.32,
+      "tok_s": 525.16,
+      "wall_s": 249.583,
+      "expected_wall_s": 249.6,
+      "drift_pct": -0.0,
+      "succ": 128,
+      "total": 128,
+      "self_consistent": true
+    },
+    "acceptance": 0.0459
+  },
+  "C_tp8x2": {
+    "dp0_c32_64req": {
+      "ttft_p50": 2444.07,
+      "ttft_p90": 7463.13,
+      "ttft_mean": 3488.89,
+      "tpot_p50": 54.39,
+      "tok_s": 563.42,
+      "wall_s": 116.318,
+      "expected_wall_s": 116.3,
+      "drift_pct": -0.0,
+      "succ": 64,
+      "total": 64,
+      "self_consistent": true
+    },
+    "dp1_c32_64req": {
+      "ttft_p50": 2455.09,
+      "ttft_p90": 7202.1,
+      "ttft_mean": 3498.11,
+      "tpot_p50": 54.33,
+      "tok_s": 564.12,
+      "wall_s": 116.174,
+      "expected_wall_s": 116.2,
+      "drift_pct": 0.0,
+      "succ": 64,
+      "total": 64,
+      "self_consistent": true
+    },
+    "agg_c32": {
+      "tok_s_sum": 1127.5,
+      "ttft_p50_balance": [
+        2444.07,
+        2455.09
+      ]
+    },
+    "dp0_c64_64req": {
+      "ttft_p50": 8904.32,
+      "ttft_p90": 14703.56,
+      "ttft_mean": 8757.24,
+      "tpot_p50": 58.41,
+      "tok_s": 944.02,
+      "wall_s": 69.422,
+      "expected_wall_s": 69.4,
+      "drift_pct": -0.0,
+      "succ": 64,
+      "total": 64,
+      "self_consistent": true
+    },
+    "dp1_c64_64req": {
+      "ttft_p50": 9043.78,
+      "ttft_p90": 15113.23,
+      "ttft_mean": 8886.99,
+      "tpot_p50": 58.51,
+      "tok_s": 940.97,
+      "wall_s": 69.648,
+      "expected_wall_s": 69.6,
+      "drift_pct": 0.0,
+      "succ": 64,
+      "total": 64,
+      "self_consistent": true
+    },
+    "agg_c64": {
+      "tok_s_sum": 1885.0,
+      "ttft_p50_balance": [
+        8904.32,
+        9043.78
+      ]
+    }
+  },
+  "finished": "2026-10-19 11:35:20"
+}

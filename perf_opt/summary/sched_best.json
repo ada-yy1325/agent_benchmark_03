@@ -18,22 +18,32 @@
       "ttft_p50_ms": 957,
       "tp_tok_s": 530,
       "tpot_p50_ms": 58.3,
-      "success_rate": 1.0
+      "success_rate": 1.0,
+      "source": "10-14 seqs_scan (128req)"
     },
     "c48_4k": {
       "ttft_p50_ms": 12632,
       "tp_tok_s": 564,
       "tpot_p50_ms": 65.7,
       "success_rate": 1.0,
-      "data_quality": "CONTAMINATED - wall 929s vs ~232s expected from own throughput; concurrent benches on same server. DO NOT CITE."
+      "data_quality": "CONTAMINATED - DO NOT CITE. Clean value (2026-10-19 clean session, 128req): ttft_p50=2300.8ms, tpot=59.6ms, 708.3 tok/s."
     },
     "c64_4k": {
       "ttft_p50_ms": 13926,
       "tp_tok_s": 640,
       "tpot_p50_ms": 65.0,
       "success_rate": 1.0,
-      "data_quality": "CONTAMINATED - wall 819s vs ~205s expected; concurrent benches on same server. Clean scan value (same config, same day, seqs_scan/seqs64_c64_4k.json) = 2522 ms. USE 2522 ms."
+      "data_quality": "CONTAMINATED - DO NOT CITE. Clean values: 10-14 scan 2522ms; 2026-10-19 clean session (128req): ttft_p50=2292.7ms, tpot=63.5ms, 964.9 tok/s."
     }
+  },
+  "clean_session_2026_10_19": {
+    "note": "All points wall-vs-throughput self-consistent (drift <0.1%). Production config (MTP=off, batched=8192, max_seqs=64), 4K->1K.",
+    "c8_32req": {"ttft_p50": 1390.1, "tpot_p50": 44.0, "tok_s": 176.3},
+    "c32_32req": {"ttft_p50": 5111.6, "tpot_p50": 51.7, "tok_s": 561.2},
+    "c32_128req": {"ttft_p50": 1972.2, "tpot_p50": 54.0, "tok_s": 569.3},
+    "c48_128req": {"ttft_p50": 2300.8, "tpot_p50": 59.6, "tok_s": 708.3},
+    "c64_128req": {"ttft_p50": 2292.7, "tpot_p50": 63.5, "tok_s": 964.9},
+    "finding": "TTFT p50 depends strongly on request count (32req=5.1s vs 128req=2.0s at c32) - queue depth changes prefill scheduling. Cross-day node differences add ~2x residual (128req: 1.0s on 10-13/14 vs 2.0s on 10-19)."
   },
   "vs_baseline": {
     "baseline_config": "batched=8192, seqs=32",

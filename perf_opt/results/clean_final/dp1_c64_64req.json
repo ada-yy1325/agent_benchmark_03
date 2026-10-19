@@ -1,0 +1,40 @@
+{
+  "case_id": "dp1_c64_64req",
+  "input_len": 4096,
+  "output_len": 1024,
+  "concurrency": 64,
+  "temperature": 0.0,
+  "ignore_eos": true,
+  "seed": 42,
+  "planned_requests": 64,
+  "successful_requests": 64,
+  "failed_requests": 0,
+  "wall_time_s": 69.648,
+  "total_input_tokens": 262144,
+  "total_output_tokens": 65536,
+  "output_tokens_per_s": 940.97,
+  "total_tokens_per_s": 4704.83,
+  "ttft_ms": {
+    "p50": 9043.78,
+    "p90": 15113.23,
+    "p99": 15901.03,
+    "mean": 8886.99
+  },
+  "tpot_ms": {
+    "p50": 58.51,
+    "p90": 63.89,
+    "p99": 65.49,
+    "mean": 58.62
+  },
+  "e2e_ms": {
+    "p50": 68875.73,
+    "p99": 69590.4
+  },
+  "success_rate": 1.0,
+  "peak_hbm_mb_per_npu": [],
+  "avg_output_tokens_per_request": 1024.0,
+  "fallback_to_text": false,
+  "timestamp": "2026-10-19T11:35:14.287200",
+  "errors": []
+}
+OK

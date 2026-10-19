@@ -1,0 +1,48 @@
+{
+  "case_id": "off_c32_128req",
+  "input_len": 4096,
+  "output_len": 1024,
+  "concurrency": 32,
+  "temperature": 0.0,
+  "ignore_eos": true,
+  "seed": 42,
+  "planned_requests": 128,
+  "successful_requests": 128,
+  "failed_requests": 0,
+  "wall_time_s": 230.225,
+  "total_input_tokens": 524288,
+  "total_output_tokens": 131072,
+  "output_tokens_per_s": 569.32,
+  "total_tokens_per_s": 2846.6,
+  "ttft_ms": {
+    "p50": 1972.21,
+    "p90": 5713.1,
+    "p99": 7975.23,
+    "mean": 2616.48
+  },
+  "tpot_ms": {
+    "p50": 53.97,
+    "p90": 54.73,
+    "p99": 55.39,
+    "mean": 53.55
+  },
+  "e2e_ms": {
+    "p50": 57324.26,
+    "p99": 63547.63
+  },
+  "success_rate": 1.0,
+  "peak_hbm_mb_per_npu": [
+    3412,
+    3411,
+    3411,
+    3411,
+    3412,
+    3411,
+    3411,
+    3411
+  ],
+  "avg_output_tokens_per_request": 1024.0,
+  "fallback_to_text": false,
+  "timestamp": "2026-10-19T11:09:24.113708",
+  "errors": []
+}
