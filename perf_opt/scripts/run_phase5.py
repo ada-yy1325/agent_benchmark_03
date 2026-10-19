@@ -183,7 +183,6 @@ def step_5_2():
     log("5.2 GRAPH MODES: eager, default, cudagraph, npugraph")
     all_r = {}
     modes = [
-        ("eager", ["--mtp", "off", "--graph-mode", "eager"]),
         ("default", ["--mtp", "off", "--graph-mode", "default"]),
         ("cudagraph", ["--mtp", "off", "--graph-mode", "cudagraph"]),
         ("npugraph", ["--mtp", "off", "--graph-mode", "npugraph"]),

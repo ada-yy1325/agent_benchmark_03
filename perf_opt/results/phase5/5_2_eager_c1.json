@@ -1,0 +1,15 @@
+{
+  "name": "5_2_eager_c1_partial",
+  "timestamp": "2026-10-19 14:30:32",
+  "note": "Eager only c1 (c8/c32/c64 skipped due to ~2.8x slower than cudagraph)",
+  "c1_4k": {
+    "ttft_p50": 445.52,
+    "tpot_p50": 129.38,
+    "tok_s": 7.69,
+    "wall_s": 2131.3,
+    "ok": 16,
+    "total": 16,
+    "ttft_p90": 497.27,
+    "tpot_p90": 133.49
+  }
+}
