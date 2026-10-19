@@ -1,26 +1,28 @@
 {
   "name": "5_2_graph",
   "timestamp": "2026-10-19 15:57:14",
-  "summary": {
-    "eager_c1": {"ttft_p50":445.52, "tpot_p50":129.38, "tok_s":7.69, "note":"Only c1 tested; 2.8x slower than cudagraph"},
+  "cases": {
     "default": {
-      "c1_4k":  {"ttft_p50":366.42, "tpot_p50":46.04, "tok_s":21.61},
-      "c8_4k":  {"ttft_p50":1210.44, "tpot_p50":45.13, "tok_s":172.42},
-      "c32_4k": {"ttft_p50":2064.58, "tpot_p50":55.33, "tok_s":554.28},
-      "c64_4k": {"ttft_p50":2345.70, "tpot_p50":64.74, "tok_s":945.54}
+      "c1_4k":  {"ttft_p50":366.42, "tpot_p50":46.04, "tok_s":21.61,  "wall_s":765.9, "drift_pct":1.01, "self_consistent":true},
+      "c8_4k":  {"ttft_p50":1210.44,"tpot_p50":45.13, "tok_s":172.42, "wall_s":388.0, "drift_pct":2.04, "self_consistent":true},
+      "c32_4k": {"ttft_p50":2064.58,"tpot_p50":55.33, "tok_s":554.28, "wall_s":244.6, "drift_pct":3.32, "self_consistent":true},
+      "c64_4k": {"ttft_p50":2345.70,"tpot_p50":64.74, "tok_s":945.54, "wall_s":147.1, "drift_pct":5.76, "self_consistent":true}
     },
     "cudagraph": {
-      "c1_4k":  {"ttft_p50":367.53, "tpot_p50":45.57, "tok_s":21.82},
-      "c8_4k":  {"ttft_p50":1218.58, "tpot_p50":44.68, "tok_s":174.29},
-      "c32_4k": {"ttft_p50":1970.05, "tpot_p50":54.83, "tok_s":560.97},
-      "c64_4k": {"ttft_p50":2405.39, "tpot_p50":64.68, "tok_s":949.19}
+      "c1_4k":  {"ttft_p50":367.53, "tpot_p50":45.57, "tok_s":21.82,  "wall_s":758.9, "drift_pct":1.06, "self_consistent":true},
+      "c8_4k":  {"ttft_p50":1218.58,"tpot_p50":44.68, "tok_s":174.29, "wall_s":384.1, "drift_pct":2.10, "self_consistent":true},
+      "c32_4k": {"ttft_p50":1970.05,"tpot_p50":54.83, "tok_s":560.97, "wall_s":241.9, "drift_pct":3.41, "self_consistent":true},
+      "c64_4k": {"ttft_p50":2405.39,"tpot_p50":64.68, "tok_s":949.19, "wall_s":146.3, "drift_pct":5.61, "self_consistent":true}
     },
     "npugraph": {
-      "c1_4k":  {"ttft_p50":363.79, "tpot_p50":45.35, "tok_s":21.96},
-      "c8_4k":  {"ttft_p50":1205.98, "tpot_p50":44.51, "tok_s":175.32},
-      "c32_4k": {"ttft_p50":1958.06, "tpot_p50":54.41, "tok_s":564.76},
-      "c64_4k": {"ttft_p50":2388.77, "tpot_p50":64.38, "tok_s":953.77}
+      "c1_4k":  {"ttft_p50":363.79, "tpot_p50":45.35, "tok_s":21.96,  "wall_s":754.2, "drift_pct":1.08, "self_consistent":true},
+      "c8_4k":  {"ttft_p50":1205.98,"tpot_p50":44.51, "tok_s":175.32, "wall_s":381.9, "drift_pct":2.12, "self_consistent":true},
+      "c32_4k": {"ttft_p50":1958.06,"tpot_p50":54.41, "tok_s":564.76, "wall_s":240.2, "drift_pct":3.38, "self_consistent":true},
+      "c64_4k": {"ttft_p50":2388.77,"tpot_p50":64.38, "tok_s":953.77, "wall_s":145.5, "drift_pct":5.55, "self_consistent":true}
     }
   },
-  "note": "Full raw data at /tmp/phase5/5_2_graph.json on remote; eager tested c1 only (2.8x slower); default/cudagraph/npugraph within 1-2% of each other"
+  "eager_partial": {
+    "note": "Eager tested c1 only; ~2.84x slower than cudagraph (TPOT 129ms vs 46ms) - only confirmed at concurrency=1",
+    "c1_4k": {"ttft_p50":445.52, "tpot_p50":129.38, "tok_s":7.69, "wall_s":2131.3, "drift_pct":0.4, "self_consistent":true}
+  }
 }
