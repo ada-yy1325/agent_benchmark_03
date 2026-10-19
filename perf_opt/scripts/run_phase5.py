@@ -51,6 +51,9 @@ def wait_health(port, timeout=300):
         except Exception:
             pass
     log(f"ERROR: port={port} not healthy after {timeout}s")
+    return False
+
+
 def start_server(server_args, port=8000, logf=None):
     env = os.environ.copy()
     env["ASCEND_RT_VISIBLE_DEVICES"] = "0,1,2,3,4,5,6,7"
@@ -268,4 +271,3 @@ if __name__ == "__main__":
     finally:
         pkill()
         log("All servers stopped.")
-    return False
