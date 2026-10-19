@@ -82,11 +82,14 @@ def run_bench(label_prefix, port, out_subdir):
             "--npu-stats", npu_csv,
             "--temp", "0.0", "--seed", "42",
         ]
+        # Use file redirects to avoid subprocess pipe deadlock (known issue on NPU nodes)
+        bench_log = str(out_dir / f"{label}_bench.log")
         t0 = time.time()
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+        with open(bench_log, "w") as lf:
+            r = subprocess.run(cmd, stdout=lf, stderr=subprocess.STDOUT, timeout=3600)
         wall_s = round(time.time() - t0, 1)
         if r.returncode != 0:
-            log(f"  FAIL {label}: rc={r.returncode}")
+            log(f"  FAIL {label}: rc={r.returncode} (see {bench_log})")
             results[case_id] = {"error": f"rc={r.returncode}", "wall_s": wall_s}
             continue
         try:
