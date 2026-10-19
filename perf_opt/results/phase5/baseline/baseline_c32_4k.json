@@ -1,0 +1,48 @@
+{
+  "case_id": "baseline_c32_4k",
+  "input_len": 4096,
+  "output_len": 1024,
+  "concurrency": 32,
+  "temperature": 0.0,
+  "ignore_eos": true,
+  "seed": 42,
+  "planned_requests": 128,
+  "successful_requests": 128,
+  "failed_requests": 0,
+  "wall_time_s": 233.878,
+  "total_input_tokens": 524288,
+  "total_output_tokens": 131072,
+  "output_tokens_per_s": 560.43,
+  "total_tokens_per_s": 2802.14,
+  "ttft_ms": {
+    "p50": 1969.35,
+    "p90": 5864.04,
+    "p99": 8293.63,
+    "mean": 2650.43
+  },
+  "tpot_ms": {
+    "p50": 54.96,
+    "p90": 55.58,
+    "p99": 56.4,
+    "mean": 54.44
+  },
+  "e2e_ms": {
+    "p50": 58270.0,
+    "p99": 64725.28
+  },
+  "success_rate": 1.0,
+  "peak_hbm_mb_per_npu": [
+    3425,
+    3424,
+    3424,
+    3424,
+    3425,
+    3424,
+    3424,
+    3424
+  ],
+  "avg_output_tokens_per_request": 1024.0,
+  "fallback_to_text": false,
+  "timestamp": "2026-10-19T12:49:37.637837",
+  "errors": []
+}

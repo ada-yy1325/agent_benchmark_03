@@ -1,0 +1,48 @@
+{
+  "case_id": "prefix_on_c64_4k",
+  "input_len": 4096,
+  "output_len": 1024,
+  "concurrency": 64,
+  "temperature": 0.0,
+  "ignore_eos": true,
+  "seed": 42,
+  "planned_requests": 128,
+  "successful_requests": 128,
+  "failed_requests": 0,
+  "wall_time_s": 136.365,
+  "total_input_tokens": 524288,
+  "total_output_tokens": 131072,
+  "output_tokens_per_s": 961.19,
+  "total_tokens_per_s": 4805.93,
+  "ttft_ms": {
+    "p50": 2236.81,
+    "p90": 12469.12,
+    "p99": 14602.36,
+    "mean": 5005.96
+  },
+  "tpot_ms": {
+    "p50": 63.83,
+    "p90": 64.07,
+    "p99": 64.9,
+    "mean": 61.34
+  },
+  "e2e_ms": {
+    "p50": 67361.39,
+    "p99": 80319.77
+  },
+  "success_rate": 1.0,
+  "peak_hbm_mb_per_npu": [
+    3425,
+    3424,
+    3424,
+    3424,
+    3425,
+    3424,
+    3424,
+    3424
+  ],
+  "avg_output_tokens_per_request": 1024.0,
+  "fallback_to_text": false,
+  "timestamp": "2026-10-19T13:49:41.707116",
+  "errors": []
+}

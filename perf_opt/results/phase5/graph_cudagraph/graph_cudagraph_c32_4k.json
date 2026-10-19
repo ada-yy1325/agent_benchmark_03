@@ -1,0 +1,48 @@
+{
+  "case_id": "graph_cudagraph_c32_4k",
+  "input_len": 4096,
+  "output_len": 1024,
+  "concurrency": 32,
+  "temperature": 0.0,
+  "ignore_eos": true,
+  "seed": 42,
+  "planned_requests": 128,
+  "successful_requests": 128,
+  "failed_requests": 0,
+  "wall_time_s": 233.653,
+  "total_input_tokens": 524288,
+  "total_output_tokens": 131072,
+  "output_tokens_per_s": 560.97,
+  "total_tokens_per_s": 2804.84,
+  "ttft_ms": {
+    "p50": 1970.05,
+    "p90": 5876.8,
+    "p99": 8347.48,
+    "mean": 2663.68
+  },
+  "tpot_ms": {
+    "p50": 54.83,
+    "p90": 55.48,
+    "p99": 56.25,
+    "mean": 54.36
+  },
+  "e2e_ms": {
+    "p50": 58077.31,
+    "p99": 64900.23
+  },
+  "success_rate": 1.0,
+  "peak_hbm_mb_per_npu": [
+    3425,
+    3424,
+    3424,
+    3424,
+    3425,
+    3424,
+    3424,
+    3424
+  ],
+  "avg_output_tokens_per_request": 1024.0,
+  "fallback_to_text": false,
+  "timestamp": "2026-10-19T15:27:45.524695",
+  "errors": []
+}

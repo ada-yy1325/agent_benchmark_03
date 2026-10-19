@@ -1,0 +1,48 @@
+{
+  "case_id": "prefix_off_c8_4k",
+  "input_len": 4096,
+  "output_len": 1024,
+  "concurrency": 8,
+  "temperature": 0.0,
+  "ignore_eos": true,
+  "seed": 42,
+  "planned_requests": 64,
+  "successful_requests": 64,
+  "failed_requests": 0,
+  "wall_time_s": 377.399,
+  "total_input_tokens": 262144,
+  "total_output_tokens": 65536,
+  "output_tokens_per_s": 173.65,
+  "total_tokens_per_s": 868.26,
+  "ttft_ms": {
+    "p50": 1220.41,
+    "p90": 1834.8,
+    "p99": 2201.93,
+    "mean": 1278.76
+  },
+  "tpot_ms": {
+    "p50": 44.83,
+    "p90": 45.34,
+    "p99": 45.63,
+    "mean": 44.81
+  },
+  "e2e_ms": {
+    "p50": 47116.06,
+    "p99": 47955.0
+  },
+  "success_rate": 1.0,
+  "peak_hbm_mb_per_npu": [
+    3425,
+    3424,
+    3424,
+    3424,
+    3425,
+    3424,
+    3424,
+    3424
+  ],
+  "avg_output_tokens_per_request": 1024.0,
+  "fallback_to_text": false,
+  "timestamp": "2026-10-19T13:16:10.425786",
+  "errors": []
+}

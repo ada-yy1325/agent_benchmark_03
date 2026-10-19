@@ -1,0 +1,48 @@
+{
+  "case_id": "prefix_off_c1_4k",
+  "input_len": 4096,
+  "output_len": 1024,
+  "concurrency": 1,
+  "temperature": 0.0,
+  "ignore_eos": true,
+  "seed": 42,
+  "planned_requests": 16,
+  "successful_requests": 16,
+  "failed_requests": 0,
+  "wall_time_s": 753.132,
+  "total_input_tokens": 65536,
+  "total_output_tokens": 16384,
+  "output_tokens_per_s": 21.75,
+  "total_tokens_per_s": 108.77,
+  "ttft_ms": {
+    "p50": 367.48,
+    "p90": 377.24,
+    "p99": 425.48,
+    "mean": 364.36
+  },
+  "tpot_ms": {
+    "p50": 45.8,
+    "p90": 46.17,
+    "p99": 46.38,
+    "mean": 45.65
+  },
+  "e2e_ms": {
+    "p50": 47170.77,
+    "p99": 47869.05
+  },
+  "success_rate": 1.0,
+  "peak_hbm_mb_per_npu": [
+    3425,
+    3424,
+    3424,
+    3424,
+    3425,
+    3424,
+    3424,
+    3424
+  ],
+  "avg_output_tokens_per_request": 1024.0,
+  "fallback_to_text": false,
+  "timestamp": "2026-10-19T13:09:44.647053",
+  "errors": []
+}

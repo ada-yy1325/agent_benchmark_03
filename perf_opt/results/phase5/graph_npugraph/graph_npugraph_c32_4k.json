@@ -1,0 +1,48 @@
+{
+  "case_id": "graph_npugraph_c32_4k",
+  "input_len": 4096,
+  "output_len": 1024,
+  "concurrency": 32,
+  "temperature": 0.0,
+  "ignore_eos": true,
+  "seed": 42,
+  "planned_requests": 128,
+  "successful_requests": 128,
+  "failed_requests": 0,
+  "wall_time_s": 232.084,
+  "total_input_tokens": 524288,
+  "total_output_tokens": 131072,
+  "output_tokens_per_s": 564.76,
+  "total_tokens_per_s": 2823.81,
+  "ttft_ms": {
+    "p50": 1958.06,
+    "p90": 5794.49,
+    "p99": 8243.21,
+    "mean": 2641.49
+  },
+  "tpot_ms": {
+    "p50": 54.41,
+    "p90": 55.26,
+    "p99": 55.85,
+    "mean": 54.01
+  },
+  "e2e_ms": {
+    "p50": 57719.87,
+    "p99": 64582.88
+  },
+  "success_rate": 1.0,
+  "peak_hbm_mb_per_npu": [
+    3425,
+    3424,
+    3424,
+    3424,
+    3425,
+    3424,
+    3424,
+    3424
+  ],
+  "avg_output_tokens_per_request": 1024.0,
+  "fallback_to_text": false,
+  "timestamp": "2026-10-19T15:54:42.683532",
+  "errors": []
+}

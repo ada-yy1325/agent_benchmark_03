@@ -1,0 +1,48 @@
+{
+  "case_id": "baseline_c8_4k",
+  "input_len": 4096,
+  "output_len": 1024,
+  "concurrency": 8,
+  "temperature": 0.0,
+  "ignore_eos": true,
+  "seed": 42,
+  "planned_requests": 64,
+  "successful_requests": 64,
+  "failed_requests": 0,
+  "wall_time_s": 376.261,
+  "total_input_tokens": 262144,
+  "total_output_tokens": 65536,
+  "output_tokens_per_s": 174.18,
+  "total_tokens_per_s": 870.88,
+  "ttft_ms": {
+    "p50": 1218.08,
+    "p90": 1752.0,
+    "p99": 2335.69,
+    "mean": 1246.55
+  },
+  "tpot_ms": {
+    "p50": 44.77,
+    "p90": 45.25,
+    "p99": 45.37,
+    "mean": 44.73
+  },
+  "e2e_ms": {
+    "p50": 47047.98,
+    "p99": 47908.94
+  },
+  "success_rate": 1.0,
+  "peak_hbm_mb_per_npu": [
+    3425,
+    3424,
+    3424,
+    3424,
+    3425,
+    3424,
+    3424,
+    3424
+  ],
+  "avg_output_tokens_per_request": 1024.0,
+  "fallback_to_text": false,
+  "timestamp": "2026-10-19T12:45:35.566822",
+  "errors": []
+}

@@ -90,10 +90,13 @@
 - [x] 4.4 enforce_eager 作用域验证 ✅ 已并入 4.1 审计（MTP 必须 eager，无调整空间）
 
 ## 阶段 5 · 其他开关 + 精度复测
-- [ ] 5.0 基线复核（MTP=OFF 单组 TP8EP8 当轮 OFF 全套） 产物：results/extra/baseline/
-- [ ] 5.1 prefix caching（含公共前缀专用负载）          产物：results/extra/prefix/
-- [ ] 5.2 cudagraph / eager / npugraph 对比            产物：results/extra/graph/
-- [ ] 5.3 additional config 逐项单变量                 产物：results/extra/add/
+- [x] 5.0 基线复核（MTP=OFF 单组 TP8EP8 当轮 OFF 全套） 产物：results/phase5/5_0_baseline.json（4 点全自洽）
+- [x] 5.1 prefix caching（含公共前缀专用负载）          产物：results/phase5/5_1_prefix.json（随机负载下无收益）
+- [x] 5.2 cudagraph / eager / npugraph 对比            产物：results/phase5/5_2_graph.json（eager 2.84×慢已止损；其余 <2%）
+- [~] 5.3 additional config 逐项单变量                 产物：results/phase5/add_*/（进行中，存档点 2026-10-19 晚）
+  - ✅ cpu_binding_off：c1/c8/c32（c32 发现 TTFT +34%！）；❌ c64 未跑
+  - ⏳ 剩余：cpu_binding_off c64 + dsa_cp_off ×4 + multistream_overlap_off ×4 + static_kernel_on ×4（~1h20m）
+  - ▶️ 续跑：远端 `setsid nohup python3 /tmp/resume_5_3.py > /tmp/phase5/_session_5.3c.log 2>&1 < /dev/null &`（自动跳过已自洽点）；若 notebook 重启需重新上传脚本
 - [ ] 5.4 KV cache 量化快速止损复测                    产物：results/extra/kv_blocked.md
 - [ ] 5.5 数值一致性检查 + 最终配置 GPQA 全量复测      产物：results/extra/gpqa_final.json
 

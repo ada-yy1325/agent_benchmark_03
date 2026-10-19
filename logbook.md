@@ -1,3 +1,65 @@
+## 2026-10-19 — 阶段 5 推进（5.0/5.1/5.2 完成、5.3 半程）+ 下班存档点
+
+---
+
+### 一、今天完成的工作（时间线）
+
+| 时间 | 事项 | 执行者 | 状态 |
+|:-----|:-----|:-------|:-----|
+| 10:58-11:35 | 阶段 4 清洗会话（13/13 自洽） | Claude Code | ✅ 见下方独立条目 |
+| 12:52 | **5.0 基线**：MTP=OFF + cudagraph + 全 additional ON，4 冻结点全自洽 | Cline | ✅ |
+| 13:49 | **5.1 prefix caching** OFF vs ON：无显著收益 | Cline | ✅ |
+| 14:30-15:57 | **5.2 graph modes**：eager 2.84× 慢（仅测 c1 即止损）；default/cudagraph/npugraph 三者 <2% | Cline | ✅ |
+| 16:44-17:05 | **5.3 additional 单变量**：cpu_binding_off 的 c1、c8 完成 | Cline | ✅ |
+| ~17:00 | Cline 第二次卡死，其编排进程死亡（未 setsid） | — | 已接管 |
+| 17:05-17:11 | 断点续跑（resume_5_3.py）：cpu_binding_off 的 c32 完成 | Claude Code | ✅ |
+| 17:12 | 按用户指示停机存档（c64 及剩余 3 开关明天续跑） | Claude Code | ✅ |
+
+### 二、5.0-5.2 结论（Cline 产出，全部点自洽校验通过）
+
+**5.0 基线**（MTP=OFF, cudagraph, cpu_binding/dsa_cp/multistream 全开, static_kernel 关）：
+c1=363.6ms/21.8 tok/s, c8=1218.1ms/174.2, c32=1969.4ms/560.4, c64=2400.3ms/946.8 —— 与清洗会话 Block A（128req 各点）完全吻合，互为印证。
+
+**5.1 prefix caching**（随机 token 负载下无共享前缀可命中）：ON vs OFF 吞吐差异 <1.5%（c32/c64 略优），TTFT c64 -6.5%（2237 vs 2392ms）。**结论：合成随机负载下 prefix caching 无实质收益；真实共享前缀负载才可能受益，本阶段结论不推广。**
+
+**5.2 graph modes**：
+- eager：TPOT 129.4ms vs cudagraph 45.6ms —— **2.84× 慢**，仅测 c1 即止损（c8/c32/c64 未跑，避免浪费 40+ 分钟）
+- default / cudagraph / npugraph：三点间吞吐与 TTFT 差异 <2%，npugraph 略优（c32: 1958 vs 1970/2065ms）但未达显著水平
+- **结论：保持 cudagraph（基线）。**
+
+### 三、5.3 现状与初步发现
+
+- cpu_binding_off 完成 3/4 点（c1/c8/c32），**c64 未跑**；其余 3 个开关（dsa_cp_off / multistream_overlap_off / static_kernel_on）未开始。
+- 初步对比（cpu_binding off vs 5.0 基线 on）：
+
+| 点 | TTFT（off vs on） | 吞吐（off vs on） | 观察 |
+|:---|:---|:---|:---|
+| c1 | 367.8 vs 363.6 (+1.2%) | 21.8 vs 21.8 | 无差异 |
+| c8 | 1224.8 vs 1218.1 (+0.5%) | 173.7 vs 174.2 | 无差异 |
+| c32 | **2646 vs 1969 (+34%)** | 567.7 vs 560.4 (+1.3%) | **TTFT 显著变差** |
+
+- 待明天：cpu_binding_off c64 + dsa_cp_off ×4 + multistream_overlap_off ×4 + static_kernel_on ×4 ≈ **1 小时 20 分钟**。
+
+### 四、问题与解决
+
+1. **Cline 第二次卡死**（巨型上下文任务 + API 中转不回包），会话死亡连带其编排进程（run_phase5.py 未用 setsid）→ 已写 resume_5_3.py 断点续跑。
+2. **续跑脚本误伤**：我的 resume 启动时 pkill 撞掉了 Cline 遗留编排正在跑的 c32（丢失 10 秒进度）→ 无实质损失，c32 由续跑完整重跑（128/128, drift 3.5% ✅）。
+3. **共享盘配额满**（项目 1.7T）→ 全部结果写容器 /tmp/phase5，收工时已抓回本地 git 备份（37 个文件）。
+4. **抓取粘文件**：graph_eager per-point json 与相邻文件粘连 → 数据已在 5_2_eager_c1.json 安全保存；5_2_graph.json 已补回 eager_partial 块。
+
+### 五、明天续跑方法（重要）
+
+- 若 notebook 未重启（/tmp 仍在）：远端一条命令 `setsid nohup python3 /tmp/resume_5_3.py > /tmp/phase5/_session_5.3c.log 2>&1 < /dev/null &`，脚本自动跳过 c1/c8/c32（存在且自洽），从 c64 继续。
+- 若 notebook 已重启（/tmp 丢失）：`/tmp/resume_5_3.py` 需重新上传（hex 分块法），且 cpu_binding_off 的 c1/c8/c32 会重跑（本地已备份结果可对照）；其余三个开关不受影响。
+- 全部完成点已有本地备份：`perf_opt/results/phase5/`。
+
+### 六、数据
+
+- `perf_opt/results/phase5/`：5_0_baseline.json、5_1_prefix.json、5_2_graph.json（含 eager_partial）、5_2_eager_c1.json、add_cpu_binding_off/{c1,c8,c32}_4k.json、_session_5.*.log、baseline/ prefix_off/ prefix_on/ graph_*/ 各 per-point jsons（共 37 文件）
+- 编排脚本：`perf_opt/scripts/run_phase5.py`（Cline）、`perf_opt/scripts/resume_5_3.py`（断点续跑）
+
+---
+
 ## 2026-10-19 — 清洗会话：全部争议延迟数据在同一会话内重测（干净、自洽、可引用）
 
 ---
