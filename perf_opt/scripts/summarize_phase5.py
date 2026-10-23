@@ -11,26 +11,26 @@ SWITCHES = [
     "static_kernel_on",
 ]
 CASES = ["c1_4k", "c8_4k", "c32_4k", "c64_4k"]
+CN_MAP = {"c1_4k": 1, "c8_4k": 8, "c32_4k": 32, "c64_4k": 64}
 
-# Load baseline
+# Load baseline (flat keys: ttft_p50, tok_s)
 baseline = json.load(open(BASELINE_PATH))
 base_data = {}
-for pt in baseline["points"]:
-    c = pt["concurrency"]
-    base_data[c] = {
-        "ttft_ms": pt["ttft_ms"]["p50"],
-        "tok_s": pt["output_tokens_per_s"],
+for case_key, case_val in baseline["cases"].items():
+    base_data[case_key] = {
+        "ttft_ms": case_val["ttft_p50"],
+        "tok_s": case_val["tok_s"],
     }
 
 print("Baseline (5.0):")
-for c in [1, 8, 32, 64]:
-    d = base_data[c]
-    print(f"  c{c}: TTFT={d['ttft_ms']:.0f}ms tok/s={d['tok_s']:.1f}")
+for k in CASES:
+    d = base_data[k]
+    print(f"  {k}: TTFT={d['ttft_ms']:.0f}ms tok/s={d['tok_s']:.1f}")
 print()
 
 summary = {"baseline": {}, "switches": {}}
-for c in [1, 8, 32, 64]:
-    summary["baseline"][f"c{c}"] = base_data[c]
+for k in CASES:
+    summary["baseline"][k] = base_data[k]
 
 for switch in SWITCHES:
     d = f"/tmp/phase5/{switch}"
@@ -42,13 +42,12 @@ for switch in SWITCHES:
             j = json.load(open(fpath))
             ttft = j["ttft_ms"]["p50"]
             tok = j["output_tokens_per_s"]
-            cn = j["concurrency"]
-            baseline_ttft = base_data[cn]["ttft_ms"]
-            baseline_tok = base_data[cn]["tok_s"]
+            baseline_ttft = base_data[case]["ttft_ms"]
+            baseline_tok = base_data[case]["tok_s"]
             d_ttft = (ttft - baseline_ttft) / baseline_ttft * 100
             d_tok = (tok - baseline_tok) / baseline_tok * 100
-            print(f"  c{cn}: TTFT={ttft:.0f}ms ({d_ttft:+.1f}%) tok/s={tok:.1f} ({d_tok:+.1f}%)")
-            sw_data[f"c{cn}"] = {
+            print(f"  {case}: TTFT={ttft:.0f}ms ({d_ttft:+.1f}%) tok/s={tok:.1f} ({d_tok:+.1f}%)")
+            sw_data[case] = {
                 "ttft_ms": ttft,
                 "tok_s": tok,
                 "delta_ttft_pct": round(d_ttft, 1),
