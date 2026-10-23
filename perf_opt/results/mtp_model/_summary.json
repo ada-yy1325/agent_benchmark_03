@@ -1,0 +1,135 @@
+{
+  "model": "/inspire/sj-ssd3/global_public/public_models/DeepSeek-V4-Flash-w8a8-mtp",
+  "started": "2026-10-23 16:52:24",
+  "prod": {
+    "c1_4k": {
+      "ttft_p50": 318.57,
+      "tpot_p50": 42.03,
+      "tok_s": 23.61,
+      "ok": 16,
+      "total": 16,
+      "wall_s": 703.0,
+      "expected_wall_s": 693.9,
+      "drift_pct": 1.28,
+      "self_consistent": true
+    },
+    "c8_4k": {
+      "ttft_p50": 884.88,
+      "tpot_p50": 42.99,
+      "tok_s": 181.68,
+      "ok": 64,
+      "total": 64,
+      "wall_s": 369.9,
+      "expected_wall_s": 360.7,
+      "drift_pct": 2.49,
+      "self_consistent": true
+    },
+    "c32_4k": {
+      "ttft_p50": 1662.35,
+      "tpot_p50": 57.71,
+      "tok_s": 538.07,
+      "ok": 128,
+      "total": 128,
+      "wall_s": 252.8,
+      "expected_wall_s": 243.6,
+      "drift_pct": 3.65,
+      "self_consistent": true
+    },
+    "c64_4k": {
+      "ttft_p50": 1840.7,
+      "tpot_p50": 69.38,
+      "tok_s": 889.76,
+      "ok": 128,
+      "total": 128,
+      "wall_s": 156.4,
+      "expected_wall_s": 147.3,
+      "drift_pct": 5.82,
+      "self_consistent": true
+    }
+  },
+  "base": {
+    "c1_4k": {
+      "ttft_p50": 318.94,
+      "tpot_p50": 42.84,
+      "tok_s": 23.21,
+      "ok": 16,
+      "total": 16,
+      "wall_s": 714.7,
+      "expected_wall_s": 705.9,
+      "drift_pct": 1.23,
+      "self_consistent": true
+    },
+    "c32_4k": {
+      "ttft_p50": 1718.94,
+      "tpot_p50": 58.3,
+      "tok_s": 531.09,
+      "ok": 128,
+      "total": 128,
+      "wall_s": 255.8,
+      "expected_wall_s": 246.8,
+      "drift_pct": 3.53,
+      "self_consistent": true
+    }
+  },
+  "mtpon": {
+    "c1_4k": {
+      "ttft_p50": 330.2,
+      "tpot_p50": 23.51,
+      "tok_s": 41.25,
+      "ok": 16,
+      "total": 16,
+      "wall_s": 405.8,
+      "expected_wall_s": 397.2,
+      "drift_pct": 2.13,
+      "self_consistent": true
+    },
+    "c8_4k": {
+      "ttft_p50": 419.14,
+      "tpot_p50": 26.98,
+      "tok_s": 282.84,
+      "ok": 64,
+      "total": 64,
+      "wall_s": 240.4,
+      "expected_wall_s": 231.7,
+      "drift_pct": 3.63,
+      "self_consistent": true
+    },
+    "c32_4k": {
+      "ttft_p50": 894.23,
+      "tpot_p50": 37.5,
+      "tok_s": 781.81,
+      "ok": 128,
+      "total": 128,
+      "wall_s": 176.5,
+      "expected_wall_s": 167.7,
+      "drift_pct": 5.03,
+      "self_consistent": true
+    },
+    "acceptance": 0.9579
+  },
+  "tp8x2": {
+    "dp0": {
+      "ttft_p50": 1883.13,
+      "tpot_p50": 58.09,
+      "tok_s": 532.39,
+      "ok": 64,
+      "total": 64,
+      "wall_s": 132.0,
+      "expected_wall_s": 123.1,
+      "drift_pct": 6.73,
+      "self_consistent": true
+    },
+    "dp1": {
+      "ttft_p50": 1895.36,
+      "tpot_p50": 57.62,
+      "tok_s": 538.07,
+      "ok": 64,
+      "total": 64,
+      "wall_s": 130.5,
+      "expected_wall_s": 121.8,
+      "drift_pct": 6.65,
+      "self_consistent": true
+    }
+  },
+  "finished": "2026-10-23 18:07:49"
+}
