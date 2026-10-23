@@ -90,26 +90,28 @@
 - [x] 4.4 enforce_eager 作用域验证 ✅ 已并入 4.1 审计（MTP 必须 eager，无调整空间）
 
 ## 阶段 5 · 其他开关 + 精度复测
-- [x] 5.0 基线复核（MTP=OFF 单组 TP8EP8 当轮 OFF 全套） 产物：results/phase5/5_0_baseline.json（4 点全自洽）
-- [x] 5.1 prefix caching（含公共前缀专用负载）          产物：results/phase5/5_1_prefix.json（随机负载下无收益）
-- [x] 5.2 cudagraph / eager / npugraph 对比            产物：results/phase5/5_2_graph.json（eager 2.84×慢已止损；其余 <2%）
-- [x] 5.3 additional config 逐项单变量                 产物：results/phase5/add_*/ + summary/5_3_summary.json ✅ 2026-10-23
-  - ✅ cpu_binding_off：c1/c8/c32/c64 全点自洽（c32 TTFT +34.3%！）
-  - ✅ dsa_cp_off：c1/c8/c32/c64 全点自洽（全局 TTFT +18~35%！严重劣化）
-  - ✅ multistream_overlap_off：c1/c8/c32/c64 全点自洽（轻微 TTFT +1~3%，吞吐 -3~5%）
-  - ✅ static_kernel_on：c1/c8/c32/c64 全点自洽（唯一正收益：TTFT 持平，吞吐 +9~12%！）
-  - 🏆 最终结论：cpu_binding=ON, dsa_cp=ON, multistream_overlap=ON, **static_kernel=ON**
-- [x] 5.4 KV cache 量化快速止损复测                    产物：results/phase5/kv_fp8/ ✅ 2026-10-23
-  - ✅ fp8 KV cache 服务启动不崩（此前 logbook 记录的 ReshapeAndCache 崩溃已修复）
-  - ✅ c1/c8/c32/c64 全部自洽，TTFT/吞吐与 static_kernel=ON 基线差异 <1.5%
-  - 结论：FP8 KV cache 安全可用，但无额外性能收益（static_kernel 已提供主收益）
-- [ ] 5.5 数值一致性检查 + 最终配置 GPQA 全量复测      产物：results/extra/gpqa_final.json
+- [x] 5.0-5.4 见历史记录（均在坏模型 w8a8-self 上完成，数据标注为历史数据）
+- [x] 5.5 数值一致性 + 最终配置 GPQA 复测 ✅ 2026-10-23（好模型 w8a8-mtp）
+  - 一致性：✅ 全过（temp=0 确定性正常）
+  - GPQA：冒烟 3/3，**全量 141/198 = 71.21%**（与历史好模型 71.2-75.3% 吻合）
+- [x] 🔴 模型事故处理 ✅ 2026-10-23
+  - 查明：w8a8-self（自量化）出生即坏（输出横杠），性能项目全程误用；好模型 w8a8-mtp/npu16 曾存在后被删
+  - 修复：切到 global_public 的 w8a8-mtp 完成全套复测（results/mtp_model/，全部自洽）
+  - 重量化：quant_dsv4_npu16.py 原方法重跑成功（2h56m）→ models/DeepSeek-V4-Flash-w8a8-npu16（280GB）
+  - 新模型验证：文本正常（EN/CN/MATH）+ GPQA 冒烟 3/3 ✅
+  - 坏模型已删（293GB），6.2MB 量化元数据留档 archive/dsv4_quant/forensics_w8a8_self/
+  - 启动脚本已切换：start_server_{mtp,param,phase5,isolated}.py → w8a8-npu16
+- [x] 5.5b 好模型性能复测（结果见 results/mtp_model/ + logbook 2026-10-23 晚）
+  - 生产配置（MTP off）：c1 319ms/23.6, c8 885ms/181.7, c32 1662ms/538.1, c64 1841ms/889.8
+  - **MTP on：接受率 95.8%！吞吐 +45~75%，TTFT -46~53% → 生产建议 MTP=ON（结论反转）**
+  - static_kernel 在好模型上仅 +1.3~1.7%；双服务器 1.99× 线性扩展
 
 ## 阶段 6 · 收尾
 - [ ] 6.1 配置-性能总表（基线→各阶段→最终）           产物：summary/final_report_table.*
 - [ ] 6.2 低延迟/高吞吐两套推荐配置（含 MTP 可选说明） 产物：summary/recommended_configs.md
 - [ ] 6.3 /tmp 产物归集（git/共享盘）                  产物：git commit、目录核对
 - [ ] 6.4 最终报告 + git tag 收尾                     产物：summary/final_report.md、tag
+- [ ] 6.5 实例镜像保存 + 关闭（2026-10-23 晚执行中）
 
 ### 统一对照压测点（阶段 5 全程冻结）
 | case | input | output | concurrency | num_requests |

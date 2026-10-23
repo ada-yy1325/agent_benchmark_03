@@ -21,7 +21,7 @@ parser.add_argument("--batched", type=int, default=8192)
 parser.add_argument("--max-seqs", type=int, default=64)
 args_cmd = parser.parse_args()
 
-MODEL_DIR = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-self"
+MODEL_DIR = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-npu16"
 
 CLI_ARGS = [
     MODEL_DIR,

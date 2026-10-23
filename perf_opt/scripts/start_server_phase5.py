@@ -68,7 +68,7 @@ parser.add_argument("--kv-cache-dtype", type=str, default="auto")
 parser.add_argument("--extra-vllm-args", type=str, default="")
 
 args_cmd = parser.parse_args()
-MODEL_DIR = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-self"
+MODEL_DIR = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-npu16"
 
 CLI_ARGS = [
     MODEL_DIR,

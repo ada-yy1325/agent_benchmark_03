@@ -62,6 +62,24 @@
 
 ---
 
+
+### 六、npu16 重量化与验证（21:50-22:15）
+
+- **重量化成功**：quant_dsv4_npu16.py 原方法重跑，2h56m，产出 models/DeepSeek-V4-Flash-w8a8-npu16（280GB，81 分片 + quant_model_description.json）
+- **新模型验证全部通过**：
+  - 英文："Paris" ✓
+  - 中文：真实内容 ✓
+  - 数学：完美逐步推导 ✓
+  - GPQA 冒烟：3/3 = 100% ✅
+- 坏模型 w8a8-self 已删除（释放 293GB），6.2MB 量化元数据留档 archive/dsv4_quant/forensics_w8a8_self/
+- 启动脚本已全部切换：start_server_{mtp,param,phase5,isolated}.py → w8a8-npu16
+
+### 七、收尾状态（22:15）
+
+- ⏳ 容器清理 → 保存镜像 → 关闭实例 → 通知（执行中）
+
+---
+
 ## 2026-10-23 — 🔴 重大发现：w8a8-self 量化模型对一切输入输出横杠（5.5 阻断）
 
 ---

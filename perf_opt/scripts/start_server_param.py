@@ -32,7 +32,7 @@ BATCHED = args_cmd.batched
 MAX_SEQS = args_cmd.max_seqs
 PORT = args_cmd.port
 
-MODEL_DIR = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-self"
+MODEL_DIR = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-npu16"
 
 CLI_ARGS = [
     MODEL_DIR,
