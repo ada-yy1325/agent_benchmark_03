@@ -1,0 +1,10 @@
+{
+  "model": "dsv4",
+  "dataset": "gpqa_diamond",
+  "num_questions": 198,
+  "correct": 141,
+  "accuracy_pct": 71.21,
+  "elapsed_s": 559.9,
+  "eval_dir": "./outputs/20261023_182141",
+  "sample_prediction": ""
+}

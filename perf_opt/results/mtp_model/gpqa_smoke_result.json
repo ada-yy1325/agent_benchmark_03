@@ -1,0 +1,10 @@
+{
+  "model": "dsv4",
+  "dataset": "gpqa_diamond",
+  "num_questions": 3,
+  "correct": 3,
+  "accuracy_pct": 100.0,
+  "elapsed_s": 27.9,
+  "eval_dir": "outputs/20261023_181320",
+  "note": "smoke on w8a8-mtp final config (static_kernel ON, fp8 KV); full run: gpqa_full_result.json = 141/198 = 71.21%"
+}
