@@ -99,7 +99,10 @@
   - ✅ multistream_overlap_off：c1/c8/c32/c64 全点自洽（轻微 TTFT +1~3%，吞吐 -3~5%）
   - ✅ static_kernel_on：c1/c8/c32/c64 全点自洽（唯一正收益：TTFT 持平，吞吐 +9~12%！）
   - 🏆 最终结论：cpu_binding=ON, dsa_cp=ON, multistream_overlap=ON, **static_kernel=ON**
-- [ ] 5.4 KV cache 量化快速止损复测                    产物：results/extra/kv_blocked.md
+- [x] 5.4 KV cache 量化快速止损复测                    产物：results/phase5/kv_fp8/ ✅ 2026-10-23
+  - ✅ fp8 KV cache 服务启动不崩（此前 logbook 记录的 ReshapeAndCache 崩溃已修复）
+  - ✅ c1/c8/c32/c64 全部自洽，TTFT/吞吐与 static_kernel=ON 基线差异 <1.5%
+  - 结论：FP8 KV cache 安全可用，但无额外性能收益（static_kernel 已提供主收益）
 - [ ] 5.5 数值一致性检查 + 最终配置 GPQA 全量复测      产物：results/extra/gpqa_final.json
 
 ## 阶段 6 · 收尾
