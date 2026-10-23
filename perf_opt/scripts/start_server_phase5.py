@@ -125,9 +125,11 @@ elif graph_mode == "npugraph":
 
 # ── 5.3 Additional config ──
 if "ascend_compilation_config" not in additional_config:
+    static_kernel = args_cmd.static_kernel == "true"
     additional_config["ascend_compilation_config"] = {
-        "enable_npugraph_ex": False,
-        "enable_static_kernel": args_cmd.static_kernel == "true",
+        # static_kernel requires npugraph_ex → auto-enable when static_kernel=on
+        "enable_npugraph_ex": static_kernel,
+        "enable_static_kernel": static_kernel,
     }
 
 additional_config["enable_cpu_binding"] = args_cmd.cpu_binding == "true"
