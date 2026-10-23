@@ -111,7 +111,10 @@
 - [ ] 6.2 低延迟/高吞吐两套推荐配置（含 MTP 可选说明） 产物：summary/recommended_configs.md
 - [ ] 6.3 /tmp 产物归集（git/共享盘）                  产物：git commit、目录核对
 - [ ] 6.4 最终报告 + git tag 收尾                     产物：summary/final_report.md、tag
-- [ ] 6.5 实例镜像保存 + 关闭（2026-10-23 晚执行中）
+- [x] 6.5 实例镜像保存 + 关闭 ✅ 2026-10-23 22:30
+  - 镜像：glm53-w8a8-env:v2（快照 322MB，READY）
+  - 实例：quant-test 已 stop，status 核实 STOPPED
+  - 量化日志归档：archive/dsv4_quant/requant_npu16_20261023.log
 
 ### 统一对照压测点（阶段 5 全程冻结）
 | case | input | output | concurrency | num_requests |
