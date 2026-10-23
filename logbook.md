@@ -1,3 +1,47 @@
+## 2026-10-23 — Phase 5.3 全面完成 ✅ + static_kernel 重大发现
+
+---
+
+### 一、Phase 5.3 完整结果（16/16 数据点，全自洽）
+
+| 开关 | c1 (TTFT/吞吐 vs baseline) | c8 | c32 | c64 | 结论 |
+|:------|:---------------------------|:----|:----|:----|:-----|
+| **cpu_binding_off** | +1.2% / -0.1% | +0.6% / -0.3% | **+34.3% 🔴** / +1.3% | +2.2% / -0.7% | 高并发 TTFT 暴增，**必开** |
+| **dsa_cp_off** | **+18.3% 🔴** / +19.5% | **+28.4% 🔴** / +18.3% | **+34.8% 🔴** / +8.1% | **+35.1% 🔴** / +0.9% | **全局 TTFT 严重劣化**，必开 |
+| **multistream_overlap_off** | +3.4% / -4.6% | +1.8% / -4.6% | +2.7% / -3.5% | +1.6% / -3.1% | 轻微不利，默认保留 |
+| **static_kernel_on** | **-0.4%** / **+11.0%** ✅ | **-0.3%** / **+11.5%** ✅ | **-0.1%** / **+9.3%** ✅ | **-0.5%** / **+8.7%** ✅ | **🏆 唯一正收益！** |
+
+### 二、关键发现
+
+1. **cpu_binding** 和 **dsa_cp** 是 Ascend NPU 的核心优化，关闭会导致 TTFT 严重恶化（c32: +34%, dsa_cp 全局 +18~35%）
+2. **multistream_overlap** 影响极小（<3%），可视场景调整
+3. **static_kernel = ON** 是唯一边际收益正向的配置：TTFT 不变，吞吐 +9~12%！此前基线 static_kernel 为 OFF，应纠正
+4. static_kernel 需要 `enable_npugraph_ex: true`（已在 start_server_phase5.py 修复，commit 4943417）
+
+### 三、🏆 最终推荐配置
+
+```
+cpu_binding = ON          ← 高并发 TTFT +34%，必开
+dsa_cp = ON               ← 全局 TTFT +18~35%，必开
+multistream_overlap = ON  ← 默认保留
+static_kernel = ON        ← ✅ 吞吐 +9~12%，TTFT 不变
+```
+
+### 四、static_kernel 启动 Bug 修复
+
+- **问题**：`start_server_phase5.py` 在 cudagraph 模式（默认）下硬编码 `enable_npugraph_ex: false`
+- **冲突**：Ascend 校验 `static_kernel requires npugraph_ex to be enabled`
+- **修复**：当 `--static-kernel true` 时自动启用 `enable_npugraph_ex: true`
+- **commit**: 4943417
+
+### 五、数据归档
+
+- 远端 `/tmp/phase5/5_3_summary.json`（完整对比 JSON）
+- 远端 `/tmp/phase5/_session_5.3c.log`（resume 全日志，cpu_binding + dsa_cp + multistream 三段）
+- 远端 `/tmp/phase5/_session_5.3d.log`（static_kernel 独立日志）
+- 新增脚本：`perf_opt/scripts/run_static_kernel.py`、`perf_opt/scripts/summarize_phase5.py`
+
+---
 ## 2026-10-19 — 阶段 5 推进（5.0/5.1/5.2 完成、5.3 半程）+ 下班存档点
 
 ---

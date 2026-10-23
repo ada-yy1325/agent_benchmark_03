@@ -93,10 +93,12 @@
 - [x] 5.0 基线复核（MTP=OFF 单组 TP8EP8 当轮 OFF 全套） 产物：results/phase5/5_0_baseline.json（4 点全自洽）
 - [x] 5.1 prefix caching（含公共前缀专用负载）          产物：results/phase5/5_1_prefix.json（随机负载下无收益）
 - [x] 5.2 cudagraph / eager / npugraph 对比            产物：results/phase5/5_2_graph.json（eager 2.84×慢已止损；其余 <2%）
-- [~] 5.3 additional config 逐项单变量                 产物：results/phase5/add_*/（进行中，存档点 2026-10-19 晚）
-  - ✅ cpu_binding_off：c1/c8/c32（c32 发现 TTFT +34%！）；❌ c64 未跑
-  - ⏳ 剩余：cpu_binding_off c64 + dsa_cp_off ×4 + multistream_overlap_off ×4 + static_kernel_on ×4（~1h20m）
-  - ▶️ 续跑：远端 `setsid nohup python3 /tmp/resume_5_3.py > /tmp/phase5/_session_5.3c.log 2>&1 < /dev/null &`（自动跳过已自洽点）；若 notebook 重启需重新上传脚本
+- [x] 5.3 additional config 逐项单变量                 产物：results/phase5/add_*/ + summary/5_3_summary.json ✅ 2026-10-23
+  - ✅ cpu_binding_off：c1/c8/c32/c64 全点自洽（c32 TTFT +34.3%！）
+  - ✅ dsa_cp_off：c1/c8/c32/c64 全点自洽（全局 TTFT +18~35%！严重劣化）
+  - ✅ multistream_overlap_off：c1/c8/c32/c64 全点自洽（轻微 TTFT +1~3%，吞吐 -3~5%）
+  - ✅ static_kernel_on：c1/c8/c32/c64 全点自洽（唯一正收益：TTFT 持平，吞吐 +9~12%！）
+  - 🏆 最终结论：cpu_binding=ON, dsa_cp=ON, multistream_overlap=ON, **static_kernel=ON**
 - [ ] 5.4 KV cache 量化快速止损复测                    产物：results/extra/kv_blocked.md
 - [ ] 5.5 数值一致性检查 + 最终配置 GPQA 全量复测      产物：results/extra/gpqa_final.json
 
