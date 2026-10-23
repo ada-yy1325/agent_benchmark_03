@@ -1,0 +1,48 @@
+{
+  "case_id": "mtpon_c8_4k",
+  "input_len": 4096,
+  "output_len": 1024,
+  "concurrency": 8,
+  "temperature": 0.0,
+  "ignore_eos": true,
+  "seed": 42,
+  "planned_requests": 64,
+  "successful_requests": 64,
+  "failed_requests": 0,
+  "wall_time_s": 231.71,
+  "total_input_tokens": 262144,
+  "total_output_tokens": 65536,
+  "output_tokens_per_s": 282.84,
+  "total_tokens_per_s": 1414.18,
+  "ttft_ms": {
+    "p50": 419.14,
+    "p90": 870.6,
+    "p99": 2227.26,
+    "mean": 626.58
+  },
+  "tpot_ms": {
+    "p50": 26.98,
+    "p90": 28.4,
+    "p99": 32.16,
+    "mean": 27.31
+  },
+  "e2e_ms": {
+    "p50": 28090.82,
+    "p99": 33309.47
+  },
+  "success_rate": 1.0,
+  "peak_hbm_mb_per_npu": [
+    3406,
+    3407,
+    3407,
+    3407,
+    3407,
+    3407,
+    3406,
+    3407
+  ],
+  "avg_output_tokens_per_request": 1024.0,
+  "fallback_to_text": false,
+  "timestamp": "2026-10-23T17:56:51.952173",
+  "errors": []
+}

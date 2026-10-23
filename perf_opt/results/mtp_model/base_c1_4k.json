@@ -1,0 +1,48 @@
+{
+  "case_id": "base_c1_4k",
+  "input_len": 4096,
+  "output_len": 1024,
+  "concurrency": 1,
+  "temperature": 0.0,
+  "ignore_eos": true,
+  "seed": 42,
+  "planned_requests": 16,
+  "successful_requests": 16,
+  "failed_requests": 0,
+  "wall_time_s": 705.967,
+  "total_input_tokens": 65536,
+  "total_output_tokens": 16384,
+  "output_tokens_per_s": 23.21,
+  "total_tokens_per_s": 116.04,
+  "ttft_ms": {
+    "p50": 318.94,
+    "p90": 363.58,
+    "p99": 405.81,
+    "mean": 328.54
+  },
+  "tpot_ms": {
+    "p50": 42.84,
+    "p90": 42.99,
+    "p99": 43.05,
+    "mean": 42.81
+  },
+  "e2e_ms": {
+    "p50": 44140.68,
+    "p99": 44365.4
+  },
+  "success_rate": 1.0,
+  "peak_hbm_mb_per_npu": [
+    3406,
+    3407,
+    3407,
+    3407,
+    3407,
+    3407,
+    3406,
+    3407
+  ],
+  "avg_output_tokens_per_request": 1024.0,
+  "fallback_to_text": false,
+  "timestamp": "2026-10-23T17:39:50.068405",
+  "errors": []
+}

@@ -1,0 +1,48 @@
+{
+  "case_id": "mtpon_c32_4k",
+  "input_len": 4096,
+  "output_len": 1024,
+  "concurrency": 32,
+  "temperature": 0.0,
+  "ignore_eos": true,
+  "seed": 42,
+  "planned_requests": 128,
+  "successful_requests": 128,
+  "failed_requests": 0,
+  "wall_time_s": 167.652,
+  "total_input_tokens": 524288,
+  "total_output_tokens": 131072,
+  "output_tokens_per_s": 781.81,
+  "total_tokens_per_s": 3909.05,
+  "ttft_ms": {
+    "p50": 894.23,
+    "p90": 5319.19,
+    "p99": 7999.73,
+    "mean": 1812.51
+  },
+  "tpot_ms": {
+    "p50": 37.5,
+    "p90": 42.96,
+    "p99": 45.87,
+    "mean": 37.78
+  },
+  "e2e_ms": {
+    "p50": 39720.34,
+    "p99": 49854.45
+  },
+  "success_rate": 1.0,
+  "peak_hbm_mb_per_npu": [
+    3406,
+    3407,
+    3407,
+    3407,
+    3407,
+    3407,
+    3406,
+    3407
+  ],
+  "avg_output_tokens_per_request": 1024.0,
+  "fallback_to_text": false,
+  "timestamp": "2026-10-23T17:59:48.484452",
+  "errors": []
+}

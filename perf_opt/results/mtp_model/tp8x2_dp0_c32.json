@@ -1,0 +1,39 @@
+{
+  "case_id": "tp8x2_dp0_c32",
+  "input_len": 4096,
+  "output_len": 1024,
+  "concurrency": 32,
+  "temperature": 0.0,
+  "ignore_eos": true,
+  "seed": 42,
+  "planned_requests": 64,
+  "successful_requests": 64,
+  "failed_requests": 0,
+  "wall_time_s": 123.097,
+  "total_input_tokens": 262144,
+  "total_output_tokens": 65536,
+  "output_tokens_per_s": 532.39,
+  "total_tokens_per_s": 2661.97,
+  "ttft_ms": {
+    "p50": 1883.13,
+    "p90": 6715.14,
+    "p99": 7949.1,
+    "mean": 3032.16
+  },
+  "tpot_ms": {
+    "p50": 58.09,
+    "p90": 58.52,
+    "p99": 59.29,
+    "mean": 57.01
+  },
+  "e2e_ms": {
+    "p50": 61093.37,
+    "p99": 67545.73
+  },
+  "success_rate": 1.0,
+  "peak_hbm_mb_per_npu": [],
+  "avg_output_tokens_per_request": 1024.0,
+  "fallback_to_text": false,
+  "timestamp": "2026-10-23T18:05:32.663725",
+  "errors": []
+}
