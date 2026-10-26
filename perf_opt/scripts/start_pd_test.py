@@ -2,7 +2,7 @@
 """
 PD Separation quick test for DeepSeek-V4-Flash-W8A8 on Ascend NPU.
 Runs two TP8 instances (prefill on cards 0-7, decode on 8-15) 
-with KV transfer via --kv-transfer-config.
+with KV transfer via AscendStoreConnector + MemcacheBackend.
 
 Usage (run on remote via tmux):
   python3 start_pd_test.py
@@ -17,7 +17,7 @@ _fc.bypass_autograd_cache_key = True
 MODEL_DIR = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-npu16"
 
 KV_TRANSFER_CONFIG = {
-    "kv_connector": "SimpleCPUOffloadConnector",
+    "kv_connector": "AscendStoreConnector",
     "kv_role": "PLACEHOLDER",  # "kv_producer" or "kv_consumer"
     "kv_parallel_size": 2,
     "kv_ip": "127.0.0.1",
@@ -25,6 +25,10 @@ KV_TRANSFER_CONFIG = {
     "kv_rank": 0,
     "kv_buffer_size": 5e8,
     "kv_load_failure_policy": "fail",
+    "kv_connector_extra_config": {
+        "backend": "shm",
+        "lookup_rpc_port": 14579,
+    },
 }
 
 def build_args(port, is_prefill):
