@@ -1,0 +1,39 @@
+{
+  "case_id": "dualA_c32",
+  "input_len": 4096,
+  "output_len": 1024,
+  "concurrency": 32,
+  "temperature": 0.0,
+  "ignore_eos": true,
+  "seed": 42,
+  "planned_requests": 64,
+  "successful_requests": 64,
+  "failed_requests": 0,
+  "wall_time_s": 82.697,
+  "total_input_tokens": 262144,
+  "total_output_tokens": 65536,
+  "output_tokens_per_s": 792.48,
+  "total_tokens_per_s": 3962.4,
+  "ttft_ms": {
+    "p50": 1704.93,
+    "p90": 6758.5,
+    "p99": 8062.57,
+    "mean": 2788.21
+  },
+  "tpot_ms": {
+    "p50": 35.77,
+    "p90": 41.03,
+    "p99": 42.79,
+    "mean": 36.2
+  },
+  "e2e_ms": {
+    "p50": 39329.86,
+    "p99": 49200.96
+  },
+  "success_rate": 1.0,
+  "peak_hbm_mb_per_npu": [],
+  "avg_output_tokens_per_request": 1024.0,
+  "fallback_to_text": false,
+  "timestamp": "2026-10-26T12:23:06.347609",
+  "errors": []
+}

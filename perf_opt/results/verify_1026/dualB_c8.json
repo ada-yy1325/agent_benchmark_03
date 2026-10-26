@@ -1,0 +1,39 @@
+{
+  "case_id": "dualB_c8",
+  "input_len": 4096,
+  "output_len": 1024,
+  "concurrency": 8,
+  "temperature": 0.0,
+  "ignore_eos": true,
+  "seed": 42,
+  "planned_requests": 32,
+  "successful_requests": 32,
+  "failed_requests": 0,
+  "wall_time_s": 116.086,
+  "total_input_tokens": 131072,
+  "total_output_tokens": 32768,
+  "output_tokens_per_s": 282.27,
+  "total_tokens_per_s": 1411.36,
+  "ttft_ms": {
+    "p50": 604.24,
+    "p90": 1939.92,
+    "p99": 2321.1,
+    "mean": 835.9
+  },
+  "tpot_ms": {
+    "p50": 26.68,
+    "p90": 28.21,
+    "p99": 29.76,
+    "mean": 26.75
+  },
+  "e2e_ms": {
+    "p50": 27888.68,
+    "p99": 30979.24
+  },
+  "success_rate": 1.0,
+  "peak_hbm_mb_per_npu": [],
+  "avg_output_tokens_per_request": 1024.0,
+  "fallback_to_text": false,
+  "timestamp": "2026-10-26T12:20:15.841905",
+  "errors": []
+}

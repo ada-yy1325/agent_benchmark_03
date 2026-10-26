@@ -1,0 +1,23 @@
+{
+  "case_id": "dualB_c32",
+  "input_len": 4096,
+  "output_len": 1024,
+  "concurrency": 32,
+  "temperature": 0.0,
+  "ignore_eos": true,
+  "seed": 42,
+  "planned_requests": 64,
+  "successful_requests": 64,
+  "failed_requests": 0,
+  "wall_time_s": 82.316,
+  "output_tokens_per_s": 796.15,
+  "ttft_ms": {
+    "p50": 1404.19,
+    "p99": 8018.4
+  },
+  "tpot_ms": {
+    "p50": 35.86
+  },
+  "success_rate": 1.0,
+  "note": "2026-10-26 dual-server MTP c32 (server B, port 8001); reconstructed from remote grep output (json lost in fetch parse)"
+}

@@ -49,32 +49,33 @@ MTP 接受率 95.8%；一致性（temp=0+seed=42 确定性）通过；GPQA 71.21
 # 服务 A（卡 0-7）
 ASCEND_RT_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
 python3 perf_opt/scripts/start_server_phase5.py \
-  --port 8000 --mtp 0 \
+  --port 8000 --mtp 1 \
   --static-kernel true --kv-cache-dtype fp8 \
   --cpu-binding true --dsa-cp true --multistream-overlap true &
 
 # 服务 B（卡 8-15）
 ASCEND_RT_VISIBLE_DEVICES=8,9,10,11,12,13,14,15 \
 python3 perf_opt/scripts/start_server_phase5.py \
-  --port 8001 --mtp 0 \
+  --port 8001 --mtp 1 \
   --static-kernel true --kv-cache-dtype fp8 \
   --cpu-binding true --dsa-cp true --multistream-overlap true &
 ```
 
 **客户端分流**：请求轮流/哈希分配到 `http://127.0.0.1:8000/v1` 与 `:8001/v1`；每个服务按自身并发上限提交（甜蜜点 c32~c64 每服务 64req）。
 
-**预期指标（w8a8-mtp 实测，c32 每服务 64req）**：
+**预期指标（2026-10-26 实测，两台均 MTP=ON，c32 每服务 64req）**：
 
 | 指标 | 值 |
 |:-----|:---|
-| 聚合 output tok/s | **1070.5**（服务A 532.4 + 服务B 538.1） |
-| 扩展比 | 1.99× vs 单服务 c32（538.1） |
-| TTFT P50 | 1883/1895 ms（两侧失衡 <0.7%） |
-| TPOT P50 | 57.6/58.1 ms |
+| 聚合 output tok/s | **1588.6**（服务A 792.5 + 服务B 796.2） |
+| vs 双服务 MTP=OFF | **+48.4%**（1070.5 → 1588.6） |
+| 扩展比 | 2.03× vs 单服务 MTP=ON c32（781.8） |
+| TTFT P50 | 1704.9 / 1404.2 ms（两侧调度差异；P99 接近：8062.6 / 8018.4） |
+| TPOT P50 | 35.8 / 35.9 ms |
 
-c64 双服务在好模型上**未实测**（坏模型同方案曾测 1.95× 扩展，仅供参考，不构成承诺）。
+c64 双服务未实测（单服务 MTP=OFF c64 = 889.8 tok/s 可参考下限）。
 
-**注意**：MTP=ON 在双服务器组合上**未实测**。单服务上 MTP=ON 已测 +45% 吞吐（781.8 @c32）；如需在双服务器启用，请先按冻结口径补测后再上线。
+**MTP 说明**：双服务+MTP 已于 2026-10-26 实测可行且收益巨大（+48.4%），两套配置均默认 MTP=ON。
 
 **容量边界**：16 卡全部占用（两个独立 TP8 各占 8 卡，互不共享 KV）；每卡峰值 HBM 与单组相同；不与其他任务共享节点时使用。
 
