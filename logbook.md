@@ -1,3 +1,83 @@
+## 2026-10-26 — PD 分离（Prefill TP8 + Decode TP8）KV 传输：ShmBackend 设计与部署成功
+
+---
+
+### 一、目标
+
+在 Ascend NPU 上启用 PD 分离（Prefill + Decode 各占 8 卡）的 KV cache 跨进程传输，使用共享内存后端替代 HCCL P2P。
+
+### 二、实现方案：ShmBackend
+
+**架构**：
+
+```
+Prefill (NPU, cards 0-7)  ←→  /dev/shm/vllm_kv_transfer/  ←→  Decode (NPU, cards 8-15)
+       ↓ swap_blocks_batch (NPU→CPU DMA)                              ↓ swap_blocks_batch (CPU→NPU DMA)
+       ↓ 原子写文件 (tmp + os.rename)                                 ↓ 读文件后删除
+```
+
+**关键技术选择**：
+- **后端**: 文件系统共享目录（默认 `/dev/shm/vllm_kv_transfer`），无需额外包或驱动升级
+- **DMA**: 复用现有 `torch.ops._C_ascend.swap_blocks_batch`（与 `simple_kv_offload` 共享基础设施）
+- **原子性**: 写临时文件 + `os.rename` 防止消费者读取不完整的 KV block
+- **清理**: 消费者读取后删除文件，`/dev/shm` 内存文件系统自动回收
+
+**文件清单**：
+
+| 文件 | 用途 |
+|:-----|:-----|
+| `perf_opt/scripts/shm_backend.py` | ShmBackend 核心实现，实现 AscendStore backend 接口 |
+| `perf_opt/scripts/deploy_shm_backend.py` | 部署脚本：复制 backend → vllm-ascend → 注册在 `backend_map` |
+| `perf_opt/scripts/start_pd_test.py` | PD 测试启动脚本（`backend: shm`，Prefill cards 0-7, Decode cards 8-15） |
+
+### 三、部署与验证结果（16:43 ~ 17:00）
+
+| 步骤 | 结果 |
+|:-----|:-----|
+| `deploy_shm_backend.py` | ✅ 复制 + 注册成功，`backend_map` 含 `"shm": "ShmBackend"` |
+| 停止旧进程 | ✅ `pkill VLLM::` + `tmux kill-session` |
+| 启动 PD 测试 | ✅ Prefill (8000) + Decode (8001) 在 tmux 启动 |
+| ShmBackend 初始化 | ✅ **16 次初始化零错误**（Prefill 8 workers + Decode 8 workers），shm_dir=`/dev/shm/vllm_kv_transfer` |
+| Health 检查 | ✅ 两个端口均返回 200 |
+| Models API | ✅ 两个端口均返回 `dsv4` 模型信息 |
+| ShmBackend 错误 | ✅ 零条 |
+| PD 相关日志 | 38 条（Prefill 20 + Decode 18） |
+
+### 四、已知约束
+
+1. **`--tokens-only` 模式**：Prefill 服务器无 tokenizer（DeepSeek-V4 的 tokenizer 在该模式下不可用），Chat API (`/v1/chat/completions`) 返回 500 AssertionError。PD 的 KV 传输基础设施完全可用，实际使用时客户端应先 token 化输入再发送。
+2. **Triton 警告**：`No module named 'triton._C.libtriton.ascend'` 为已知环境问题，不影响运行。
+
+### 五、环境信息
+
+- **实例**: quant-test（16 卡 ASCEND 910B2C）
+- **远程路径**: `/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test`
+- **模型**: DeepSeek-V4-Flash-w8a8-npu16（280GB）
+- **vLLM**: 0.23.0 + vllm-ascend
+- **Python**: 3.13
+
+### 六、运行中的服务
+
+| 角色 | 端口 | NPU 卡 | tmux 会话 | 状态 |
+|:-----|:-----|:-------|:----------|:-----|
+| Prefill (kv_producer) | 8000 | 0-7 (TP8) | `pd_prefill` | ✅ 运行中 |
+| Decode (kv_consumer) | 8001 | 8-15 (TP8) | `pd_decode` | ✅ 运行中 |
+
+查看方式：
+```bash
+inspire notebook shell quant-test --workspace 昇腾卡公共空间
+tmux attach -t pd_prefill   # 或 pd_decode
+```
+
+### 七、明天继续
+
+- [ ] 测试实际 KV 传输（预 token 化请求到 `/inference/v1/generate`）
+- [ ] PD 性能基准测试（TTFT、TPOT、吞吐 vs 单组 TP8）
+- [ ] 验证 KV 传输延迟和吞吐
+- [ ] 如需停止服务：`tmux kill-session -t pd_prefill` + `tmux kill-session -t pd_decode`
+
+---
+
 ## 2026-10-23（晚）— 好模型(w8a8-mtp)全套复测：MTP 结论反转、GPQA 71.21%、npu16 重量化启动
 
 ---
