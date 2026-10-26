@@ -1,0 +1,21 @@
+stage,model,topology,mtp,graph,additional,batched,max_seqs,point,ttft_p50_ms,ttft_p99_ms,tpot_p50_ms,output_tok_s,success_rate,note
+0-基线,w8a8-self(坏),TP8EP8x1,1,cudagraph,cpu/dsa/multi ON;static OFF,8192,32,c1_4k,355.0,364.2,46.0,21.7,1.0,TPOT/吞吐为伪影修正值
+1-画像,w8a8-self(坏),TP8EP8x1,1,cudagraph,同基线,8192,32,c1_4k,354.7,,45.4,21.9,1.0,
+1-画像,w8a8-self(坏),TP8EP8x1,1,cudagraph,同基线,8192,32,c8_4k,658.3,2390.9,47.9,160.1,1.0,
+1-画像,w8a8-self(坏),TP8EP8x1,1,cudagraph,同基线,8192,32,c32_4k,965.9,8431.6,58.4,521.7,1.0,
+1-画像,w8a8-self(坏),TP8EP8x1,1,cudagraph,同基线,8192,32,c64_4k,62152.9,,58.4,525.4,1.0,prefill崩溃
+2-调度,w8a8-self(坏),TP8EP8x1,1,cudagraph,同基线,8192,64,c64_4k,2522.1,,70.3,831.0,1.0,max_seqs 32->64: TTFT -96%
+3-拓扑,w8a8-self(坏),TP8EP8x2独立,0,cudagraph,同基线,8192,64,c32_4k(每服务64req),2444.0,,54.4,1127.5,1.0,聚合=单服务1.99x
+3-拓扑,w8a8-self(坏),TP8EP8x2独立,0,cudagraph,同基线,8192,64,c64_4k(每服务64req),8904.0,,58.5,1885.0,1.0,聚合=单服务1.95x
+4-MTP,w8a8-self(坏),TP8EP8x1,1,cudagraph,同基线,8192,64,c1_4k,356.5,,46.1,21.4,1.0,接受率4.73%;吞吐-2.3% vs OFF
+4-MTP,w8a8-self(坏),TP8EP8x1,1,cudagraph,同基线,8192,64,c8_4k,765.2,,48.2,160.5,1.0,坏模型退化行为;结论已被推翻
+5-开关,w8a8-self(坏),TP8EP8x1,0,cudagraph,static_kernel ON,8192,64,c32_4k,1662.0,,57.7,538.1,1.0,static_kernel坏模型上+9~12%(好模型仅+1.3~1.7%)
+5.5-精度,w8a8-mtp(好),TP8EP8x1,0,cudagraph,cpu/dsa/multi ON;static ON;kv fp8,8192,64,gpqa_full,141/198=71.21%,,,,,一致性全过;vs历史72.22%无显著回归
+最终-低延迟,w8a8-mtp(好),TP8EP8x1,1,cudagraph,cpu/dsa/multi ON;static ON;kv fp8,8192,64,c1_4k,330.0,,23.5,41.2,1.0,接受率95.8%
+最终-低延迟,w8a8-mtp(好),TP8EP8x1,1,cudagraph,cpu/dsa/multi ON;static ON;kv fp8,8192,64,c8_4k,419.0,,27.0,282.8,1.0,
+最终-低延迟,w8a8-mtp(好),TP8EP8x1,1,cudagraph,cpu/dsa/multi ON;static ON;kv fp8,8192,64,c32_4k,894.0,,37.5,781.8,1.0,
+最终-参照OFF,w8a8-mtp(好),TP8EP8x1,0,cudagraph,cpu/dsa/multi ON;static ON;kv fp8,8192,64,c1_4k,318.6,,42.0,23.6,1.0,
+最终-参照OFF,w8a8-mtp(好),TP8EP8x1,0,cudagraph,cpu/dsa/multi ON;static ON;kv fp8,8192,64,c8_4k,884.9,,43.0,181.7,1.0,
+最终-参照OFF,w8a8-mtp(好),TP8EP8x1,0,cudagraph,cpu/dsa/multi ON;static ON;kv fp8,8192,64,c32_4k,1662.4,,57.7,538.1,1.0,
+最终-参照OFF,w8a8-mtp(好),TP8EP8x1,0,cudagraph,cpu/dsa/multi ON;static ON;kv fp8,8192,64,c64_4k,1841.0,,69.4,889.8,1.0,
+最终-高吞吐,w8a8-mtp(好),TP8EP8x2独立,0,cudagraph,cpu/dsa/multi ON;static ON;kv fp8,8192,64,c32_4k(每服务64req),1889.0,,57.9,1070.5,1.0,MTP ON 双服务器未实测
