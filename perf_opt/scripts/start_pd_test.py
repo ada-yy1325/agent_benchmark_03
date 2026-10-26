@@ -38,19 +38,27 @@ def build_args(port, is_prefill):
         "--served-model-name", "dsv4", "--gpu-memory-utilization", "0.9",
         "--max-num-seqs", "64", "--data-parallel-size", "1",
         "--tensor-parallel-size", "8", "--enable-expert-parallel",
-        "--tokenizer-mode", "deepseek_v4", "--tool-call-parser", "deepseek_v4",
-        "--enable-auto-tool-choice", "--reasoning-parser", "deepseek_v4",
         "--quantization", "ascend", "--block-size", "128",
         "--compilation-config", '{"cudagraph_mode": "FULL_DECODE_ONLY"}',
         "--kv-transfer-config", json.dumps(cfg, separators=(",", ":")),
-        # SimpleCPUOffloadConnector requires prefix caching ON
-        "--speculative-config",
-        '{"num_speculative_tokens": 1, "method": "mtp", "enforce_eager": true}',
         "--additional-config",
         '{"ascend_compilation_config":{"enable_npugraph_ex":true,"enable_static_kernel":true},"enable_cpu_binding":true,"enable_dsa_cp":true,"multistream_overlap_shared_expert":true}',
     ]
+    
     if is_prefill:
+        # tokens-only mode: NO tokenizer available, so skip tokenizer-dependent args
         args.append("--tokens-only")
+    else:
+        # Decode: needs tokenizer for text output
+        args.extend([
+            "--tokenizer-mode", "deepseek_v4",
+            "--tool-call-parser", "deepseek_v4",
+            "--enable-auto-tool-choice",
+            "--reasoning-parser", "deepseek_v4",
+            "--speculative-config",
+            '{"num_speculative_tokens": 1, "method": "mtp", "enforce_eager": true}',
+        ])
+    
     return args
 
 
