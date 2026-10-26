@@ -53,7 +53,7 @@
 
 | 项 | 状态 |
 |:---|:-----|
-| KV 量化 | FP8 已确认真正生效（cache.py:269 日志 + KV 分配 14.13 GiB/卡），性能中性 <1.5%；更深 KV 量化未测 |
+| KV 量化 | FP8 已确认真正生效（cache.py:269 日志 + KV 分配 14.13 GiB/卡）；独立性能影响未单独隔离（与 static_kernel 组合 +1.3~1.7%）；更深 KV 量化未测 |
 | 显存占用 | 2026-10-26 修正：真实 HBM ~59.8GB/卡（91% 利用率，余 ~5.7GB/卡）——此前"3.4GB/卡"系采样正则漏配所致，已修复 regex 并作废 |
 | TP16 / 原生 DP2×TP8 / DP4×TP4 | 均不可行（shape 不兼容 / vllm-ascend SetDevice bug / OOM），日志见 results/topo/ |
 | spec=2 MTP | cudagraph shape 冲突（spec+1=3 与 TP8 序列并行不互质），未解禁 |

@@ -359,6 +359,6 @@
   "fp8_kv_verified_2026_10_26": {
     "active": true,
     "evidence": "server log: [cache.py:269] Using fp8 data type to store kv cache",
-    "perf_impact": "neutral (<1.5%)"
+    "perf_impact": "not isolated on healthy model; combined with static_kernel +1.3~1.7%"
   }
 }

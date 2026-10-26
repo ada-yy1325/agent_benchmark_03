@@ -2,7 +2,7 @@
 
 日期：2026-10-26（10-26 复核更新：真实显存、fp8 生效确认、双服务+MTP 补测）｜ 数据来源：`results/mtp_model/`、`results/verify_1026/` 全部实测文件（逐点自洽校验通过）
 
-> **口径说明**：本页所有数字均为**正常模型**（w8a8-mtp 官方量化版实测；生产启动脚本指向同方法重新量化并经文本+评测验证的 w8a8-npu16，本次双服务补测即在 npu16 上完成）在同一会话内实测所得。压测口径统一：4K 输入 / 1K 输出 / temp=0 / seed=42 / c1=16req、c8=64req、c32=128req、c64=128req；双服务测试每侧 64req。历史异常数据已整体作废，不引用。
+> **口径说明**：本页所有数字均为**正常模型**（w8a8-mtp 官方量化版实测；生产启动脚本指向同方法重新量化并经文本+评测验证的 w8a8-npu16，本次双服务补测即在 npu16 上完成）实测所得：单服务数据为 2026-10-23 会话（w8a8-mtp）实测，双服务补测为 2026-10-26 会话（w8a8-npu16）实测——两者为同配方量化、均经文本与评测验证的正常模型，跨会话对比已在文中注明。压测口径统一：4K 输入 / 1K 输出 / temp=0 / seed=42 / c1=16req、c8=64req、c32=128req、c64=128req；双服务测试每侧 64req。历史异常数据已整体作废，不引用。
 
 ---
 
@@ -81,7 +81,7 @@ ASCEND_RT_VISIBLE_DEVICES=8,9,10,11,12,13,14,15 python3 perf_opt/scripts/start_s
 - 双服务 MTP=ON vs 双服务 MTP=OFF（1070.5）：**+48.4%**
 - 双服务 MTP=ON vs 单服务 MTP=ON（781.8）：**2.03× 线性扩展**
 - 两侧吞吐失衡 **0.46%**；TTFT 失衡：c32 时 A 侧 1704.9ms / B 侧 1404.2ms（+21%，两台独立服务的正常调度差异，P99 两侧接近：8062.6 / 8018.4ms）
-- static_kernel 开关贡献（同会话实测）：吞吐 +1.3~1.7%（c1 23.61 vs 23.21；c32 538.07 vs 531.09），TTFT c32 −3.3%
+- static_kernel + fp8 KV 组合贡献（同会话实测，两个变量同时变化）：吞吐 +1.3~1.7%（c1 23.61 vs 23.21；c32 538.07 vs 531.09），TTFT c32 −3.3%
 
 ### 指标 4 · 成功率
 
@@ -89,7 +89,7 @@ ASCEND_RT_VISIBLE_DEVICES=8,9,10,11,12,13,14,15 python3 perf_opt/scripts/start_s
 
 ### 指标 5 · 显存占用（2026-10-26 实测修正）
 
-**真实 HBM 占用：~59.8 GB / 65.5 GB 每卡（91% 利用率），仅余 ~5.7 GB/卡**。
+**真实 HBM 占用：~59.8 GB / 65.5 GB 每卡（91% 利用率），仅余 ~5.6 GB/卡**。
 
 - 权威来源：npu-smi 原始输出 `HBM-Usage(MB): 59796 / 65536` + vLLM 内存画像（**KV cache 实际分配 14.13 GiB/卡**；权重+框架占用后每卡空闲 19.15 GiB）
 - **修正说明**：此前报告中的"峰值 3.4GB/卡"为压测脚本采样错误（正则 `(\d+)\s+/\s+(\d+)` 要求斜杠两侧有空格，而 npu-smi 真实格式为 `59796/ 65536`（斜杠前无空格），导致采样到错误字段），该数字作废，本页显存结论以 HBM-Usage 字段为准
@@ -105,7 +105,7 @@ ASCEND_RT_VISIBLE_DEVICES=8,9,10,11,12,13,14,15 python3 perf_opt/scripts/start_s
 | GPQA-Diamond 精度 | **141/198 = 71.21%** | 对比 72.22% 参考值：**−1.01 个百分点**（相对 −1.4%），无显著回归 |
 | 冒烟评测 | 3/3 = 100% | |
 | 数值一致性 | ✅ 通过 | temp=0 + seed=42 下确定性输出（简单/推理两类提示词 3 次一致） |
-| fp8 KV cache | **已确认真正生效** | 启动日志 `[cache.py:269] Using fp8 data type to store kv cache`；KV 分配 14.13 GiB/卡；性能中性 <1.5% |
+| fp8 KV cache | **已确认真正生效** | 启动日志 `[cache.py:269] Using fp8 data type to store kv cache`；KV 分配 14.13 GiB/卡；独立性能影响未单独隔离（与 static_kernel 同开，组合 +1.3~1.7%） |
 | 双服务线性扩展（MTP=ON） | **2.03×** | 聚合 1588.6 tok/s @c32；两侧吞吐失衡 0.46% |
 | 文本质量 | 正常 | 英/中/数学推导输出正确 |
 
@@ -119,16 +119,16 @@ ASCEND_RT_VISIBLE_DEVICES=8,9,10,11,12,13,14,15 python3 perf_opt/scripts/start_s
 | TPOT（c32） | **37.5 ms** | 35.8 ms |
 | 输出吞吐（c32） | **781.8 tok/s** | **1588.6 tok/s 聚合** |
 | 成功率 | 100% | 100% |
-| 显存/卡 | ~59.8 GB（91%，余 ~5.7GB） | 同左 |
+| 显存/卡 | ~59.8 GB（91%，余 ~5.6GB） | 同左 |
 | 精度 | GPQA 71.21%（无回归） | 同左 |
 
 **优化手段与对应收益（全部实测）**：
 1. **MTP=ON**（接受率 95.8%）：单机吞吐 +45~75%、TPOT −35~44%、c8/c32 TTFT −46~53%；**双机上再 +48.4%（1070.5→1588.6）** —— 收益最大的单项
 2. **max_seqs=64** 调度配置：c64 首字延迟 1.8s（4K/128req 口径）
 3. **双独立 TP8 + MTP**：聚合 1588.6 tok/s，2.03× 线性扩展，两侧均衡
-4. **必开开关**：cpu_binding（关掉 c32 TTFT +34%）、dsa_cp（关掉全局 TTFT +18~35%）
-5. **可选开关**：static_kernel（+1.3~1.7% 吞吐）、fp8 KV（已确认生效，中性 <1.5%）
-6. **弃用项**：eager 图模式（TPOT 慢 2.84×）、spec=2（cudagraph shape 冲突不支持）、prefix caching（随机负载无收益）
+4. **cpu_binding、dsa_cp 保持开启**：好模型全部实测（含双服务）均在此配置下完成且 100% 成功；关闭影响未在好模型上复测——如需关闭请先按冻结口径 A/B
+5. **可选开关**：static_kernel + fp8 KV（组合 +1.3~1.7% 吞吐）
+6. **未采用项**：eager 图模式（好模型全部实测均用 cudagraph）、spec=2（cudagraph shape 冲突，栈级限制）、prefix caching（好模型实测均关闭）
 
 ## 五、选择指引
 
@@ -142,5 +142,5 @@ ASCEND_RT_VISIBLE_DEVICES=8,9,10,11,12,13,14,15 python3 perf_opt/scripts/start_s
 
 - 数据：`results/mtp_model/`（单服务 11 点 + GPQA + 一致性）、`results/verify_1026/`（2026-10-26 双服务 MTP 补测 4 点 + 显存/fp8 核实记录）
 - 总表：`summary/final_report_table.{json,csv}` ｜ 明细：`summary/final_report.md` ｜ 本文件
-- 脚本：`scripts/start_server_phase5.py`（启动）、`bench_serving.py`（压测，npu-smi 采样 regex 待修为 `(\d+)\s*/\s*(\d+)`）、`mtp_model_suite.py`、`gpqa_mtp.py`
+- 脚本：`scripts/start_server_phase5.py`（启动）、`bench_serving.py`（压测，npu-smi 采样 regex 已于 2026-10-26 修复）、`mtp_model_suite.py`、`gpqa_mtp.py`
 - 模型：`models/DeepSeek-V4-Flash-w8a8-npu16`（280GB）｜ 镜像：`glm53-w8a8-env:v2` ｜ git tag：`perf-opt-final`
