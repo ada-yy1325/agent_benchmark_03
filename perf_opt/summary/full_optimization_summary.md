@@ -6,6 +6,34 @@
 
 ---
 
+## 零、基线是怎么测的（测量条件）
+
+**基线定义**：本文所有"改善 X%"的对照基准 = **配置 A 关闭 MTP**（即下文指标表格中的"MTP OFF 对照"列），2026-10-23 实测。
+
+| 条件 | 基线测量环境 |
+|:-----|:-------------|
+| 模型 | w8a8-mtp 官方量化版（平台 global_public 公共目录，280GB，81 个量化分片 + quant_model_description.json） |
+| 生产模型 | w8a8-npu16（同配方重新量化，已文本+GPQA 冒烟验证；性能等价） |
+| 硬件 | **8× NPU 910B2C**（每卡 64GB HBM），设备 0-7，单节点 |
+| 平台 | 启智平台昇腾卡公共空间，notebook `quant-test`（10-23 会话节点 infra-gpu-npu-033） |
+| 软件 | 镜像 glm53-w8a8-env（v2 快照）；vLLM 0.23.0 + vllm-ascend；CANN 9.0.0（环境 PATH 实测） |
+| 服务配置 | TP8+EP8、DP1；MTP off；cudagraph（FULL_DECODE_ONLY）；batched=8192；max_seqs=64；max-model-len=133120；gpu-memory-utilization=0.9；block-size=128；prefix caching 关；cpu_binding/dsa_cp/multistream 开；static_kernel 开；fp8 KV 开 |
+| 压测口径 | 4K 输入 / 1K 输出 / temp=0 / seed=42 / c1=16req、c8=64req、c32=128req、c64=128req；bench_serving.py 随机 token 输入 + ignore_eos |
+| 校验 | 每个点 wall-time 与吞吐自洽（drift <7%） |
+
+**基线数值**：
+
+| 并发 | TTFT P50 | TPOT P50 | 输出吞吐 |
+|:-----|:---------|:---------|:---------|
+| c1 | 318.6 ms | 42.0 ms | 23.61 tok/s |
+| c8 | 884.9 ms | 43.0 ms | 181.68 |
+| c32 | 1662.4 ms | 57.7 ms | 538.07 |
+| c64 | 1840.7 ms | 69.4 ms | 889.76 |
+
+**说明**：① 压测输入为随机 token 序列——性能数字描述的是同等算力消耗下的机械吞吐与延迟，与生成内容无关（模型文本质量已由一致性检查 + GPQA 71.21% 单独验证）；② 双服务补测（2026-10-26）在同一配置、不同节点（infra-gpu-npu-420）上完成，已在文中注明。
+
+---
+
 ## 一、最终部署配置（两套，启动命令可直接复制）
 
 ```bash
