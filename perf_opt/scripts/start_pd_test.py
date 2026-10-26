@@ -56,13 +56,17 @@ def build_args(port, is_prefill):
 
 def start_vllm(name, devices, args, logfile):
     os.makedirs(os.path.dirname(logfile), exist_ok=True)
-    cli_quoted = " ".join(f'"{a}"' if " " in a else a for a in args)
+    # Write args to temp file for safe passing
+    args_file = os.path.join(os.path.dirname(logfile), f"{name}_args.json")
+    with open(args_file, "w") as f:
+        json.dump(args, f)
     script = f"""#!/bin/bash
 export OMP_PROC_BIND=false OMP_NUM_THREADS=10 PYTORCH_NPU_ALLOC_CONF=expandable_segments:True
 export HCCL_BUFFSIZE=1024 TASK_QUEUE_ENABLE=1 HCCL_OP_EXPANSION_MODE=AIV VLLM_ASCEND_ENABLE_FLASHCOMM1=1
 export ASCEND_RT_VISIBLE_DEVICES={devices}
+export _PD_ARGS_FILE={args_file}
 cd /inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test
-exec python3 {__file__} --serve {cli_quoted} 2>&1 | tee {logfile}
+exec python3 {__file__} 2>&1 | tee {logfile}
 """
     script_path = os.path.join(os.path.dirname(logfile), f"_{name}_launch.sh")
     with open(script_path, "w") as f:
@@ -70,7 +74,7 @@ exec python3 {__file__} --serve {cli_quoted} 2>&1 | tee {logfile}
     os.chmod(script_path, 0o755)
     os.system(f"tmux kill-session -t {name} 2>/dev/null")
     os.system(f"tmux new-session -d -s {name} bash {script_path}")
-    print(f"[launcher] Started tmux session '{name}' (port included in args)")
+    print(f"[launcher] Started tmux '{name}' (devices={devices})")
 
 
 def wait_healthy(port, timeout=900):
@@ -88,26 +92,30 @@ def wait_healthy(port, timeout=900):
     return False
 
 
-def main():
-    import argparse
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--serve", nargs=argparse.REMAINDER)
-    args_remainder = ap.parse_args()
+def serve_mode():
+    """Run actual vLLM server with args from temp file."""
+    args_file = os.environ.get("_PD_ARGS_FILE", "")
+    if not args_file or not os.path.exists(args_file):
+        return False
+    with open(args_file, "r") as f:
+        cli_args = json.load(f)
+    from vllm.utils.argparse_utils import FlexibleArgumentParser
+    from vllm.entrypoints.openai.cli_args import make_arg_parser, validate_parsed_serve_args
+    p = FlexibleArgumentParser(description="vLLM PD")
+    p = make_arg_parser(p)
+    a = p.parse_args(cli_args)
+    validate_parsed_serve_args(a)
+    if hasattr(a, "model_tag") and a.model_tag is not None:
+        a.model = a.model_tag
+    if hasattr(a, "tokenizer_tag") and a.tokenizer_tag is not None:
+        a.tokenizer = a.tokenizer_tag
+    from vllm.entrypoints.openai.api_server import run_server
+    asyncio.run(run_server(a))
+    return True
 
-    if args_remainder.serve:
-        # Subprocess mode: run the actual vLLM server
-        from vllm.utils.argparse_utils import FlexibleArgumentParser
-        from vllm.entrypoints.openai.cli_args import make_arg_parser, validate_parsed_serve_args
-        p = FlexibleArgumentParser(description="vLLM PD")
-        p = make_arg_parser(p)
-        a = p.parse_args(args_remainder.serve)
-        validate_parsed_serve_args(a)
-        if hasattr(a, "model_tag") and a.model_tag is not None:
-            a.model = a.model_tag
-        if hasattr(a, "tokenizer_tag") and a.tokenizer_tag is not None:
-            a.tokenizer = a.tokenizer_tag
-        from vllm.entrypoints.openai.api_server import run_server
-        asyncio.run(run_server(a))
+
+def main():
+    if serve_mode():
         return
 
     # Main mode: launch both servers
@@ -127,14 +135,24 @@ def main():
     p_args = build_args(8000, is_prefill=True)
     start_vllm("pd_prefill", "0,1,2,3,4,5,6,7", p_args, "/tmp/pd_test/prefill.log")
 
-    if wait_healthy(8001, 600) and wait_healthy(8000, 600):
+    print("\nServers started. Waiting 15s then checking health...")
+    time.sleep(15)
+    
+    healthy_decode = wait_healthy(8001, 60)
+    healthy_prefill = wait_healthy(8000, 60)
+    
+    if healthy_decode and healthy_prefill:
         print("\n✅ Both servers healthy! PD separation is RUNNING.")
-        print("Prefill: http://127.0.0.1:8000 (tokens-only)")
-        print("Decode:  http://127.0.0.1:8001")
-        print("\nTo benchmark decode server:")
-        print("  python3 bench_serving.py --base-url http://127.0.0.1:8001/v1 ...")
+    elif healthy_decode:
+        print("\n⚠️ Decode healthy but prefill not yet ready (graph may still be compiling)")
+    elif healthy_prefill:
+        print("\n⚠️ Prefill healthy but decode not yet ready")
     else:
-        print("\n❌ PD servers failed. Check /tmp/pd_test/*.log")
+        print("\n⏳ Servers still starting (graph compilation ~10-25min). Check later:")
+        print("  tmux attach -t pd_decode")
+        print("  tmux attach -t pd_prefill")
+        print("  curl http://127.0.0.1:8000/health")
+        print("  curl http://127.0.0.1:8001/health")
 
 if __name__ == "__main__":
     main()
