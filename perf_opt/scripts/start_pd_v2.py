@@ -127,7 +127,7 @@ def serve_mode():
     return True
 
 
-def main():
+def main(serial: bool = False):
     if serve_mode():
         return
 
@@ -135,25 +135,42 @@ def main():
     os.system("pkill -9 -f 'VLLM::' 2>/dev/null; sleep 2")
     for p in [8000, 8001]:
         os.system(f"fuser -k {p}/tcp 2>/dev/null")
+    # Clean stale CANN kernel cache to avoid corruption
+    os.system(
+        "find /usr/local/Ascend/cann-*/opp/static_kernel/ "
+        "-name 'static_kernel_*' -mmin +600 -exec rm -rf {} + 2>/dev/null"
+    )
 
     print("=" * 60)
     print("PD Separation v2: Prefill(0-7) + Decode(8-15)")
+    if serial:
+        print("Mode: SERIAL (decode first, then prefill)")
     print("=" * 60)
 
-    # Start decode first (consumer), then prefill (producer)
+    # Start decode first (consumer)
     d_args = build_args(8001, is_prefill=False)
     start_vllm("pd_decode", "8,9,10,11,12,13,14,15", d_args, "/tmp/pd_test/decode_v2.log")
     time.sleep(3)
-    
+
+    if serial:
+        print("\n[serial] Waiting for decode instance to be healthy (up to 30 min)...")
+        healthy_decode = wait_healthy(8001, timeout=1800)
+        if not healthy_decode:
+            print("❌ Decode instance failed to start. Check log.")
+            sys.exit(1)
+        print("[serial] Decode healthy! Starting prefill...")
+
     p_args = build_args(8000, is_prefill=True)
     start_vllm("pd_prefill", "0,1,2,3,4,5,6,7", p_args, "/tmp/pd_test/prefill_v2.log")
 
-    print("\nServers started. Waiting 15s then checking health...")
-    time.sleep(15)
-    
-    healthy_decode = wait_healthy(8001, 60)
-    healthy_prefill = wait_healthy(8000, 60)
-    
+    if serial:
+        healthy_prefill = wait_healthy(8000, timeout=1800)
+    else:
+        print("\nServers started. Waiting 15s then checking health...")
+        time.sleep(15)
+        healthy_decode = wait_healthy(8001, 60)
+        healthy_prefill = wait_healthy(8000, 60)
+
     if healthy_decode and healthy_prefill:
         print("\n✅ Both servers healthy! PD separation is RUNNING.")
     elif healthy_decode:
@@ -168,4 +185,5 @@ def main():
         print("  curl http://127.0.0.1:8001/health")
 
 if __name__ == "__main__":
-    main()
+    serial = "--serial" in sys.argv
+    main(serial=serial)
