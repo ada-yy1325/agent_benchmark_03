@@ -51,19 +51,18 @@ def build_args(port, is_prefill):
         '{"ascend_compilation_config":{"enable_npugraph_ex":true,"enable_static_kernel":true},"enable_cpu_binding":true,"enable_dsa_cp":true,"multistream_overlap_shared_expert":true}',
     ]
     
-    if is_prefill:
-        # tokens-only mode: NO tokenizer available, so skip tokenizer-dependent args
-        args.append("--tokens-only")
-    else:
-        # Decode: needs tokenizer for text output
+    # Both instances need tokenizer for DeepSeek-V4
+    if not is_prefill:
         args.extend([
-            "--tokenizer-mode", "deepseek_v4",
-            "--tool-call-parser", "deepseek_v4",
-            "--enable-auto-tool-choice",
-            "--reasoning-parser", "deepseek_v4",
             "--speculative-config",
             '{"num_speculative_tokens": 1, "method": "mtp", "enforce_eager": true}',
         ])
+    args.extend([
+        "--tokenizer-mode", "deepseek_v4",
+        "--tool-call-parser", "deepseek_v4",
+        "--enable-auto-tool-choice",
+        "--reasoning-parser", "deepseek_v4",
+    ])
     
     return args
 
