@@ -135,10 +135,10 @@ def main(serial: bool = False):
     os.system("pkill -9 -f 'VLLM::' 2>/dev/null; sleep 2")
     for p in [8000, 8001]:
         os.system(f"fuser -k {p}/tcp 2>/dev/null")
-    # Clean stale CANN kernel cache to avoid corruption
+    # Clean stale CANN kernel cache to avoid corruption from previous runs
     os.system(
         "find /usr/local/Ascend/cann-*/opp/static_kernel/ "
-        "-name 'static_kernel_*' -mmin +600 -exec rm -rf {} + 2>/dev/null"
+        "-name 'static_kernel_*' -exec rm -rf {} + 2>/dev/null"
     )
 
     print("=" * 60)
