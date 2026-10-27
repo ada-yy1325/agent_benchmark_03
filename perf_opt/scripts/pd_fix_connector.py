@@ -31,6 +31,10 @@ def main():
     new_text = "".join(new_block)
 
     if old_text not in content:
+        # Check if already fixed
+        if "is_consumer" in content and "not is_consumer" in content:
+            print("✅ PD fix already applied (idempotent)")
+            return 0
         print("❌ Target pattern not found! Content around lookup_server:")
         for i, line in enumerate(lines):
             if "lookup_server" in line or "rank == 0" in line:
