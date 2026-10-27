@@ -1,3 +1,67 @@
+## 2026-10-27 — PD KV 池共享验证成功：Consumer 跳过 Prefill 端到端提速 1.5-1.8x
+
+---
+
+### 一、测试目标
+
+验证两个独立 vLLM-Ascend TP8 实例间的 **AscendStoreConnector KV 池（ShmBackend）共享**是否可行。
+
+### 二、环境修复
+
+| 步骤 | 内容 | 状态 |
+|:-----|:-----|:---:|
+| `pd_fix_connector.py` | Consumer 跳过创建 LookupKeyServer（避免 ZMQ bind 冲突） | ✅ 已应用 |
+| 串行启动 | 先启 Decode (cards 8-15)，等健康后启 Prefill (cards 0-7) | ✅ 避免 CANN kernel 竞态 |
+| CANN 缓存清理 | `rm -rf static_kernel_*` | ✅ 清理上次竞态损坏的缓存 |
+
+### 三、启动结果
+
+```
+Decode (8001, cards 8-15): healthy @ 88s
+Prefill (8000, cards 0-7):  healthy @ 85s
+```
+
+### 四、两阶段 KV 池测试结果
+
+**测试脚本**: `perf_opt/scripts/test_pd_two_phase.py`
+**流程**: 先发到 Producer（Prefill+Save），再发相同 prompt 到 Consumer（Load+Decode）
+
+| # | Prompt | Producer (s) | Consumer (s) | Speedup |
+|:--|:-------|:----------:|:----------:|:---:|
+| 1 | 500字AI教育文章 | 19.1 | 11.2 | 1.7x |
+| 2 | 量子计算科普 | 18.4 | 10.3 | 1.8x |
+| 3 | 快排实现+注释 | 23.6 | 13.2 | 1.8x |
+| 4 | PD分离解释 | 23.7 | 14.5 | 1.6x |
+| 5 | AI科幻故事 | 23.7 | 15.6 | 1.5x |
+
+**Consumer completion_tokens ≈ 400-512，与 Producer 基本一致** → KV 加载成功。
+
+### 五、关键发现
+
+1. ✅ **AscendStoreConnector 跨实例 KV 池共享可行**
+2. ✅ **Consumer 跳过 prefill，端到端延迟降低 ~1.6x**
+3. ✅ **LookupKeyServer ZMQ 冲突已修复，双实例可共存**
+4. ✅ **串行启动避免 CANN static kernel 编译竞态**
+5. ⚠️ **speedup 受限于 decode 时间占比**（短 prompt + 400-512 token 输出，decode 占主导）
+
+### 六、下一步：真 PD
+
+当前是**客户端两阶段 KV 共享**，不是真 PD。真 PD 需要：
+- Producer 只做 prefill（--tokens-only）
+- Consumer 只做 decode
+- 请求自动路由（客户端编排 或 `--data-parallel-size 2` + 内部调度）
+- **并发请求下 prefill 与 decode 重合** 才能体现真 PD 吞吐优势
+
+### 七、技术债务
+
+| 项目 | 状态 | 备注 |
+|:-----|:---:|:-----|
+| `P2PShmConnector` (data_parallel_size=2) | ⏸️ 未测试 | 代码已写（`p2p_shm_connector.py`），需要在单命令 DP 模式下验证 |
+| `start_pd_v3.py` | ⏸️ 未测试 | 配套启动脚本 |
+| 真 PD 并发压测 | ⏸️ 待实施 | 需要 `bench_serving.py` + 并发请求 + Prefill/Decode 重合 |
+| CANN kernel 竞态 | ⚠️ 观察中 | 串行启动规避了问题，长期需找 `ASCEND_CACHE_PATH` 隔离方案 |
+
+---
 ## 2026-10-27 — PD 压测数据 & 诊断：Decode 独立运行良好，PD 委托未生效
 
 ---
