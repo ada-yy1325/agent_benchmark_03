@@ -55,13 +55,14 @@ def main():
         print("[pd-full-hash] already patched")
         return 0
 
-    # 1. ensure hash_block_tokens import
+    # 1. ensure hash_block_tokens import (anchor on a known line)
     imp = "from vllm.v1.core.kv_cache_utils import hash_block_tokens"
     if imp not in src:
-        # insert after the last existing "from vllm" import
-        imports = [m.end() for m in re.finditer(r"^from vllm[^\n]*\n", src, re.M)]
-        pos = max(imports) if imports else 0
-        src = src[:pos] + imp + "\n" + src[pos:]
+        anchor_imp = "from vllm.v1.core.kv_cache_manager import KVCacheBlocks\n"
+        if anchor_imp not in src:
+            print("[pd-full-hash] ERROR: import anchor not found")
+            return 1
+        src = src.replace(anchor_imp, anchor_imp + imp + "\n", 1)
         print("[pd-full-hash] added hash_block_tokens import")
 
     # 2. insert the extension right before the client.lookup call
@@ -71,11 +72,19 @@ def main():
         return 1
     src = src.replace(anchor, INSERTION + anchor, 1)
 
-    # 3. backup + write
+    # 3. backup + write + verify
     if not os.path.exists(TARGET + ".pd_bak"):
         os.system(f"cp {TARGET} {TARGET}.pd_bak")
     open(TARGET, "w").write(src)
-    print("[pd-full-hash] patch written (backup: pool_scheduler.py.pd_bak)")
+    import py_compile
+    try:
+        py_compile.compile(TARGET, doraise=True)
+        print("[pd-full-hash] patch written + py_compile OK (backup: pool_scheduler.py.pd_bak)")
+    except py_compile.PyCompileError as e:
+        print(f"[pd-full-hash] ERROR: patched file fails to compile: {e}")
+        os.system(f"cp {TARGET}.pd_bak {TARGET}")  # rollback
+        print("[pd-full-hash] rolled back to backup")
+        return 1
     return 0
 
 
