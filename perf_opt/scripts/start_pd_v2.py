@@ -48,7 +48,7 @@ def build_args(port, is_prefill):
         "--compilation-config", '{"cudagraph_mode": "FULL_DECODE_ONLY"}',
         "--kv-transfer-config", json.dumps(cfg, separators=(",", ":")),
         "--additional-config",
-        '{"ascend_compilation_config":{"enable_npugraph_ex":true,"enable_static_kernel":true},"enable_cpu_binding":true,"enable_dsa_cp":true,"multistream_overlap_shared_expert":true}',
+        '{"ascend_compilation_config":{"enable_npugraph_ex":false,"enable_static_kernel":false},"enable_cpu_binding":true,"enable_dsa_cp":true,"multistream_overlap_shared_expert":true}',
     ]
     
     # Both instances need tokenizer for DeepSeek-V4
