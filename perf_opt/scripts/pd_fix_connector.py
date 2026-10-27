@@ -20,7 +20,7 @@ def main():
     ]
     new_block = [
         "            # PD fix: kv_consumer queries producer's LookupKeyServer via shared socket\n",
-        "            is_consumer = (self.kv_role == \"kv_consumer\")\n",
+        "            is_consumer = (self.kv_role == \"kv_consumer\" or getattr(vllm_config.parallel_config, \"data_parallel_rank\", 0) > 0)\n",
         "            if vllm_config.parallel_config.rank == 0 and not is_consumer:\n",
         "                self.lookup_server = LookupKeyServer(self.connector_worker, vllm_config, self.use_layerwise)\n",
     ]
@@ -31,10 +31,22 @@ def main():
     new_text = "".join(new_block)
 
     if old_text not in content:
-        # Check if already fixed
+        # Check if already fixed (both v2 and v3 compatible)
         if "is_consumer" in content and "not is_consumer" in content:
-            print("✅ PD fix already applied (idempotent)")
-            return 0
+            if "data_parallel_rank" in content:
+                print("✅ PD fix already applied (idempotent, DP-aware)")
+                return 0
+            else:
+                print("⚠️  Old v2 fix detected (no data_parallel_rank). Re-applying DP-aware fix...")
+                # Replace the old v2 fix content with new DP-aware fix
+                content = content.replace(
+                    'is_consumer = (self.kv_role == "kv_consumer")',
+                    'is_consumer = (self.kv_role == "kv_consumer" or getattr(vllm_config.parallel_config, "data_parallel_rank", 0) > 0)'
+                )
+                with open(PATH, "w") as f:
+                    f.write(content)
+                print("✅ PD fix updated to DP-aware version!")
+                return 0
         print("❌ Target pattern not found! Content around lookup_server:")
         for i, line in enumerate(lines):
             if "lookup_server" in line or "rank == 0" in line:

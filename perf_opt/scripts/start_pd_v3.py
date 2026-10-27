@@ -19,48 +19,26 @@ ASCEND_STORE_DIR = f"{PKG}/vllm_ascend/distributed/kv_transfer/kv_pool/ascend_st
 CONNECTOR_FILE = f"{ASCEND_STORE_DIR}/ascend_store_connector.py"
 PD_CONNECTOR_FILE = f"{ASCEND_STORE_DIR}/p2p_shm_connector.py"
 
-PD_SYNC_DIR = "/dev/shm/vllm_pd_sync"
-
 KV_CONFIG = (
     '{"kv_connector":"P2PShmConnector",'
     '"kv_role":"kv_both","kv_parallel_size":2,'
-    '"kv_ip":"127.0.0.1","kv_port":14579,"kv_rank":0,'
-    '"kv_buffer_size":500000000,"kv_load_failure_policy":"fail",'
+    '"kv_buffer_size":500000000,'
     '"kv_connector_extra_config":{'
-    '"backend":"shm","lookup_rpc_port":14579,"consumer_is_to_load":true'
+    '"backend":"shm","consumer_is_to_load":true'
     '}}'
 )
 
 
 def apply_fix():
-    """Ensure consumer does NOT create LookupKeyServer."""
-    with open(CONNECTOR_FILE) as f:
-        content = f.read()
-    if "not is_consumer" in content:
-        return  # Already fixed
-
-    # Backup
-    bak = CONNECTOR_FILE + ".pd_fix_bak"
-    if not os.path.exists(bak):
-        shutil.copy2(CONNECTOR_FILE, bak)
-        print(f"[env] Backup: {bak}")
-
-    old = (
-        "            if vllm_config.parallel_config.rank == 0:\n"
-        "                self.lookup_server = LookupKeyServer("
-        "self.connector_worker, vllm_config, self.use_layerwise)\n"
-    )
-    new = (
-        "            # PD fix: kv_consumer skips LookupKeyServer\n"
-        "            is_consumer = (self.kv_role == \"kv_consumer\")\n"
-        "            if vllm_config.parallel_config.rank == 0 and not is_consumer:\n"
-        "                self.lookup_server = LookupKeyServer("
-        "self.connector_worker, vllm_config, self.use_layerwise)\n"
-    )
-    content = content.replace(old, new)
-    with open(CONNECTOR_FILE, "w") as f:
-        f.write(content)
-    print("[env] Applied PD fix to AscendStoreConnector")
+    """Ensure consumer does NOT create LookupKeyServer (DP-aware)."""
+    # Delegate to pd_fix_connector.py which handles both v2 and v3
+    fix_script = f"{PROJECT}/perf_opt/scripts/pd_fix_connector.py"
+    result = subprocess.run([sys.executable, fix_script],
+                           capture_output=True, text=True)
+    print(result.stdout.strip())
+    if result.returncode != 0:
+        print(f"[env] ERROR applying PD fix: {result.stderr}")
+        sys.exit(1)
 
 
 def install_connector():
@@ -76,16 +54,19 @@ def install_connector():
     init_file = f"{PKG}/vllm_ascend/distributed/kv_transfer/__init__.py"
     with open(init_file) as f:
         content = f.read()
-    marker = 'KVConnectorFactory.register_connector(\n        "LMCacheAscendConnector",'
-    injection = (
-        '\n    KVConnectorFactory.register_connector(\n'
-        '        "P2PShmConnector",\n'
-        '        "vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.p2p_shm_connector",\n'
-        '        "P2PShmConnector",\n'
-        '    )\n'
-    )
+
     if "P2PShmConnector" not in content:
-        content = content.replace(marker, injection + "    " + marker)
+        # Inject after LMCacheAscendConnector registration
+        marker = '        "LMCacheConnectorV1",\n    )'
+        injection = (
+            '\n'
+            '    KVConnectorFactory.register_connector(\n'
+            '        "P2PShmConnector",\n'
+            '        "vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.p2p_shm_connector",\n'
+            '        "P2PShmConnector",\n'
+            '    )\n'
+        )
+        content = content.replace(marker, marker + injection)
         with open(init_file, "w") as f:
             f.write(content)
         print("[env] Registered P2PShmConnector in __init__.py")
@@ -103,9 +84,9 @@ def main():
     # Step 1: Cleanup previous runs
     os.system("pkill -9 -f 'VLLM::' 2>/dev/null; sleep 2")
     os.system("fuser -k 8000/tcp 2>/dev/null; fuser -k 8001/tcp 2>/dev/null")
-    if os.path.exists(PD_SYNC_DIR):
-        shutil.rmtree(PD_SYNC_DIR)
-    os.makedirs(PD_SYNC_DIR)
+    # Clean CANN static kernel cache to avoid compile races
+    os.system("rm -rf /root/.cache/torch_npu/static_kernel_* 2>/dev/null")
+    os.makedirs("/tmp/pd_test", exist_ok=True)
 
     # Step 2: Environment setup
     apply_fix()
