@@ -44,7 +44,7 @@ def build_args(port, is_prefill):
         "--served-model-name", "dsv4", "--gpu-memory-utilization", "0.9",
         "--max-num-seqs", "64", "--data-parallel-size", "1",
         "--tensor-parallel-size", "8", "--enable-expert-parallel",
-        "--quantization", "ascend", "--block-size", "128",
+        "--quantization", "ascend", "--block-size", "128", "--enable-prefix-caching",
         "--compilation-config", '{"cudagraph_mode": "FULL_DECODE_ONLY"}',
         "--kv-transfer-config", json.dumps(cfg, separators=(",", ":")),
         "--additional-config",
