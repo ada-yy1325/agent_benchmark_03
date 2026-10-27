@@ -23,7 +23,7 @@ KV_TRANSFER_CONFIG = {
     "kv_ip": "127.0.0.1",
     "kv_port": 14579,
     "kv_rank": 0,
-    "kv_buffer_size": 5e8,
+    "kv_buffer_size": 3.2e10,
     "kv_load_failure_policy": "fail",
     "kv_connector_extra_config": {
         "backend": "shm",
