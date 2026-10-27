@@ -1,3 +1,39 @@
+## 2026-10-27 — PD 分离探索结论（真实边界已测明）
+
+---
+
+### 一、测试了什么
+
+在好模型（w8a8-npu16）上系统测试了三条 PD 路径：
+
+| 路径 | 结果 | 证据 |
+|:-----|:-----|:-----|
+| ① vLLM 原生单部署 DP=2 + P2PShmConnector | ❌ 不可行 | 两种编译配置均崩：`AssertionError: expected OutputCode, got _CompiledFxGraph / GraphModuleImpl`——vllm-ascend 编译管线不支持 DP>1（与阶段 3 的 SetDevice bug 同源） |
+| ② 两独立实例 + AscendStore ShmBackend KV 池 | ✅ 短 prompt 有效 / ❌ 长 prompt 受限 | Cline 的两阶段测试复现：短 prompt（~150 token）consumer 跳过 ~90% prefill，端到端 1.5-2.0×；但 **4K prompt 池只命中 ~512 token**（首 chunk），consumer 重新 prefill ~88% |
+| ③ 客户端流水线编排（producer prefill+save / consumer load+decode 重叠） | ⚠️ 对 4K/1K 无收益 | 32 请求实测：producer 高效（363ms/请求），但 consumer 全量重 prefill → TTFT 5.1s@c32（vs 统一服务器 4.1s），流水线是净亏损 |
+
+### 二、根因与排查过程（供后续引用）
+
+1. **KV 池容量**：`kv_buffer_size` 增大到 32GB 无效——ShmBackend 实际分配仍 ~500MB（/dev/shm psm 文件实测），该字段不控制实际分配。
+2. **命中粒度**：lookup 遍历 `request.block_hashes`，而 vLLM 只在**开启 prefix caching** 时完整计算——已加 `--enable-prefix-caching` 重测，仍只命中首 chunk（~512 token=4 blocks）——限制在 producer 的保存路径（只保存首 prefill chunk 的 blocks），上游实现限制。
+3. 已排除的变量：token-id vs 文本 prompt（文本路径可命中，token-id 完全不命中）、重复文本 vs 变体文本、producer decode 长度、consumer 并发与流式、0.5s→5s 延迟——均无影响。
+4. 环境修复沿用 Cline：consumer 跳过 LookupKeyServer（ZMQ 冲突）、串行启动（CANN 编译竞态）。
+
+### 三、对用户目标的诚实结论
+
+- **PD 分离在冻结口径（4K/1K）上当前不可行**：上游 vllm-ascend 需修复 DP 编译与长 prompt 全量 KV 保存。
+- **短 prompt 场景（≤512 token）PD 有效**：consumer 跳过 ~90% prefill（1.5-2.0×），可用 `test_pd_two_phase.py` 流程复现。
+- **当前栈上最优"分离"形态仍是双服务 MTP=ON**（1588.6 tok/s，2.03×，两侧独立=天然负载隔离/稳定性）。
+- 后续可行方向：等 vllm-ascend 上游修复；或引入 Mooncake 等成熟 KV 传输方案（需新环境与适配）。
+
+### 四、新增/修改资产
+
+- `scripts/start_pd_v2.py`：kv_buffer_size 5e8→3.2e10（实测不影响实际分配，保留）；新增 `--enable-prefix-caching`（block_hashes 完整性所需）
+- `scripts/pd_pipeline_bench.py`：客户端流水线编排压测（文本 prompt 路径）
+- 远端：`/tmp/pd_test/pipeline_result.json`（32 请求实测）、Cline 的 v2/v3 启动器与修复脚本已入库
+
+---
+
 ## 2026-10-27 — PD KV 池共享验证成功：Consumer 跳过 Prefill 端到端提速 1.5-1.8x
 
 ---
