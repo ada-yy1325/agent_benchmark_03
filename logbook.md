@@ -1,3 +1,35 @@
+## 2026-10-27（晚）— PD 攻坚第二回合：全哈希补丁完成 + 发现平台环境回归
+
+---
+
+### 一、做了什么
+
+1. **定位了 KV 池只命中 ~512 token 的根因**：vLLM V1 逐步填充 `request.block_hashes`，consumer 首次调度时只有首 chunk（4 blocks=512 token）的哈希 → AscendStore 池 lookup 只能匹配首段。
+2. **写好外科手术补丁** `scripts/pd_full_hash_fix.py`：在 `pool_scheduler.get_num_new_matched_tokens` 的 lookup 前，用 vLLM 自己的链式哈希（`hash_block_tokens`）把 block_hashes 补全到整个 prompt——同环境同哈希函数，键必然与 producer 保存的一致。幂等、带备份（.pd_bak）、py_compile 校验 + 失败自动回滚（第一版 import 插入锚点选错导致语法错误，已修复并验证）。
+3. 排查中确认：token-id 路径完全不命中（必须文本）、kv_buffer_size 字段不控制实际分配（实测固定 ~500MB）、--enable-prefix-caching 是 block_hashes 完整性的必要条件（已加入启动器）。
+
+### 二、遇到的环境问题（重要）
+
+**平台 NPU 环境今天下午起全局回归**：所有节点（412/416/420）、所有配置（含今早还正常的标准配置）启动时均崩于同一错误：
+`RuntimeError: fill_: aclnnInplaceFillScalar failed, error code 561103` + `FillAiCore ADD_TO_LAUNCHER_LIST_AICORE failed`（发生在 vllm_ascend worker 的 profile_run 阶段）。
+- 早上（Cline 会话）与 10-26 的启动全部正常 → 是下午的增量变化（疑似平台驱动/固件更新）
+- 判别实验：纯标准配置（无 PD、无补丁）在 420 上同样失败 → 与我们的代码无关
+- 尝试过：换节点（412 坏、416 满、420 同样崩）、关 static_kernel、实例重启清零 NPU 状态——均无效
+
+### 三、结论
+
+- PD 补丁**已完成但未能在今天实测**（环境不可用）；等平台修复后按 `logbook.md` 的验证步骤直接跑：补丁 → 串行启动 → 4K 两阶段（看 consumer prompt throughput ≈0）→ 流水线基准 → 对比双服务 MTP=ON 1588.6 tok/s
+- 建议向平台报告 FillAiCore 561103 回归（附本日志时间线）
+
+### 四、资产
+
+- `scripts/pd_full_hash_fix.py`（补丁，commit 6570221/beff584 等）
+- `scripts/start_pd_v2.py`（prefix caching + static_kernel off + buffer 3.2e10）
+- 新实例 quant-test-pd2（node 420，测试后已停）；quant-test 保持停止
+- 环境镜像仍为 glm53-w8a8-env:v2（今天未做环境改动，无需新镜像）
+
+---
+
 ## 2026-10-27 — PD 分离探索结论（真实边界已测明）
 
 ---
