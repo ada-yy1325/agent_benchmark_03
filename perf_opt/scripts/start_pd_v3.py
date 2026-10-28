@@ -84,8 +84,9 @@ def main():
     # Step 1: Cleanup previous runs
     os.system("pkill -9 -f 'VLLM::' 2>/dev/null; sleep 2")
     os.system("fuser -k 8000/tcp 2>/dev/null; fuser -k 8001/tcp 2>/dev/null")
-    # Clean CANN static kernel cache to avoid compile races
-    os.system("rm -rf /root/.cache/torch_npu/static_kernel_* 2>/dev/null")
+    # NOTE: do NOT delete the torch_npu static kernel cache — it is regenerable
+    # but every cold recompile costs minutes; keep it warm. (10-28)
+    os.system("ls /root/.cache/torch_npu/static_kernel_* 2>/dev/null")
     os.makedirs("/tmp/pd_test", exist_ok=True)
 
     # Step 2: Environment setup

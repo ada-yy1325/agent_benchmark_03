@@ -48,7 +48,7 @@ def build_args(port, is_prefill):
         "--compilation-config", '{"cudagraph_mode": "FULL_DECODE_ONLY"}',
         "--kv-transfer-config", json.dumps(cfg, separators=(",", ":")),
         "--additional-config",
-        '{"ascend_compilation_config":{"enable_npugraph_ex":true,"enable_static_kernel":true},"enable_cpu_binding":true,"enable_dsa_cp":true,"multistream_overlap_shared_expert":true}',
+        '{"ascend_compilation_config":{"enable_npugraph_ex":true,"enable_static_kernel":false},"enable_cpu_binding":true,"enable_dsa_cp":true,"multistream_overlap_shared_expert":true}',
     ]
     
     # Both instances need tokenizer for DeepSeek-V4
@@ -135,10 +135,12 @@ def main(serial: bool = False):
     os.system("pkill -9 -f 'VLLM::' 2>/dev/null; sleep 2")
     for p in [8000, 8001]:
         os.system(f"fuser -k {p}/tcp 2>/dev/null")
-    # Clean stale CANN kernel cache to avoid corruption from previous runs
+    # NOTE: do NOT delete static_kernel_* dirs — they are precompiled at image
+    # build and NOT regenerated on this platform (deletion breaks every fill op
+    # with aclnn 561103 / FillAiCore). See PD_ISSUE_REPORT_1028.md.
     os.system(
         "find /usr/local/Ascend/cann-*/opp/static_kernel/ "
-        "-name 'static_kernel_*' -exec rm -rf {} + 2>/dev/null"
+        "-name 'static_kernel_*' -exec ls {} + 2>/dev/null"
     )
 
     print("=" * 60)

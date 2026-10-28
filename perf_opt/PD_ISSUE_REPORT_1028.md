@@ -1,5 +1,21 @@
 # PD 分离问题详细报告（2026-10-28，给其他 Agent）
 
+## 🎯 根因已定案（2026-10-28 下午，最终结论）
+
+**所有 fill/aclnn 崩溃的真正原因：`start_pd_v2.py` 启动时的"清理"步骤误删了静态内核包。**
+
+证据链（全部实测）：
+1. `start_pd_v2.py` 每次启动执行 `rm -rf /usr/local/Ascend/cann-*/opp/static_kernel/static_kernel_*`——把 10-26 镜像构建时用 bisheng-compiler 编译的 **8 个静态内核包**（`static_kernel_261026*_*`）全部删除。
+2. 该平台运行时**不会再生**这些内核；任何 aclnn 算子走静态路径时按 `config/ascend910b/binary_info_config.json` 查找 binPath → 文件不存在 → `561103` / `FillAiCore ADD_TO_LAUNCHER_LIST_AICORE failed` 硬崩（不回退动态编译）。
+3. 独立最小复现：`torch.zeros(1).fill_()` 在配置完好时通过；图捕获（`torch_npu.npu.graph` 上下文中含 fill）在 binary_info_config.json 仍含 Fill 条目时必崩。
+4. 与连接器（Mooncake/AscendStore）、eager/图模式、multistream、节点（412/416/420）**均无关**——之前"连接器必崩"是混杂变量误判（所有连接器实验恰好都走了带清理的启动路径或删内核后的环境；E1 成功是因为手动启动未清理）。
+5. 修复（三处最小改动，已全部验证）：
+   - `config.ini` 备份并清空 `load_priority`（原文件备份为 `config.ini.bak`）
+   - `binary_info_config.json` 备份并清空为 `{}`（备份为 `.bak`）
+   - `start_pd_v2.py` / `start_pd_v3.py` 的清理命令改为无害 `ls`（防再犯）
+   - `start_pd_v2.py` 的 `enable_static_kernel: true → false`（动态 JIT 跑通；静态内核后续可用 torch_npu 的 compile_static_kernel 再生恢复性能）
+6. 验证结果：迷你图捕获测试 `CAPTURE+FILL OK`；PD 双服务器 FINAL6 启动成功（decode 8001 + prefill 8000 双 200）；4K 两阶段验证 **consumer TTFT=0.316s**（producer 本地 prefill ~1.4s），2768-token prompt 全量命中池，**full-hash 补丁生效**。
+
 ## 目标
 
 在昇腾 910B2C ×16 上给 DeepSeek-V4-Flash（W8A8 量化）做 PD（prefill/decode）分离，改善 TTFT 与 output tok/s。对比基准：双服务 MTP=ON 聚合 1588.6 tok/s @c32；统一服务器 c32 TTFT 4114ms。
