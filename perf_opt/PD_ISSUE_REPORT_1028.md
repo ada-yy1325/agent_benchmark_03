@@ -53,6 +53,22 @@ EZ9999 AclNN_Inner_Err
 
 根因：V1 逐步填充 block_hashes。补丁 `scripts/pd_full_hash_fix.py` 已写好（幂等、py_compile 验证、自动回滚），但因问题 B 未能实测。
 
+## 决定性对照实验矩阵（2026-10-28 完成，全部在 node 416 全新容器上）
+
+| # | 配置（从冻结基准逐次加变量） | 结果 |
+|:-:|:-----|:-----|
+| 冻结 | 10-26 tag 代码 + 无补丁 + 图模式 + MTP=1 + static + fp8 KV + multistream ON | ✅ 成功（输出 "Paris"） |
+| B1 | + pd_full_hash_fix 补丁 | ✅ 成功（补丁无罪） |
+| B3 | Mooncake v2 启动器全套（eager） | ❌ worker 初始化阶段崩（AclNN_Inner_Err） |
+| P4 | 冻结 + eager + MooncakeConnector | ❌（36 处 fill/aclnn） |
+| P5 | 冻结 + eager + AscendStoreConnector | ❌ |
+| B4 | 冻结 + eager + AscendStore + **multistream OFF** | ❌（54 处） |
+
+**结论更新**：
+1. 平台"坏算子"结论**修正**：常规推理路径（含图模式）在干净容器上完全正常——FAQ 的"图捕获过多"理论可解释部分图模式崩溃，但无法解释 eager+连接器崩溃。
+2. **唯一稳定触发条件 = kv-transfer-config（连接器）存在**：无论 Mooncake/AscendStore、无论 eager/图模式、无论 multistream 开关，连接器初始化必崩。冻结配置则一切正常。
+3. 下一步建议（给下一位）：定位连接器初始化路径中调用了哪些 aclnn 算子（worker init 阶段），对照常规路径的算子使用差异；或在连接器 init 代码中打日志二分具体崩溃算子。
+
 ## 复现命令（供下一位直接跑）
 
 ```bash
