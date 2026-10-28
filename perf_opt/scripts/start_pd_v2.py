@@ -17,35 +17,30 @@ _fc.bypass_autograd_cache_key = True
 MODEL_DIR = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-npu16"
 
 KV_TRANSFER_CONFIG = {
-    "kv_connector": "AscendStoreConnector",
-    "kv_role": "PLACEHOLDER",  # "kv_producer" or "kv_consumer"
-    "kv_parallel_size": 2,
-    "kv_ip": "127.0.0.1",
-    "kv_port": 14579,
-    "kv_rank": 0,
-    "kv_buffer_size": 3.2e10,
-    "kv_load_failure_policy": "fail",
+    # Mooncake KV transfer (official vLLM PD path, v0.23 native)
+    "kv_connector": "MooncakeConnector",
+    "kv_port": "36000",
     "kv_connector_extra_config": {
-        "backend": "shm",
-        "lookup_rpc_port": 14579,
+        "prefill": {"dp_size": 1, "tp_size": 8},
+        "decode": {"dp_size": 1, "tp_size": 8},
     },
 }
 
 def build_args(port, is_prefill):
     cfg = dict(KV_TRANSFER_CONFIG)
     cfg["kv_role"] = "kv_producer" if is_prefill else "kv_consumer"
-    cfg["kv_rank"] = 0 if is_prefill else 1
-    if not is_prefill:
-        cfg["kv_connector_extra_config"]["consumer_is_to_load"] = True
+    cfg["kv_port"] = "36000" if is_prefill else "36100"
 
     args = [
         MODEL_DIR, "--host", "0.0.0.0", "--port", str(port),
-        "--max-model-len", "133120", "--max-num-batched-tokens", "8192",
+        "--max-model-len", "40960",
+        "--max-num-batched-tokens", "16384" if is_prefill else "256",
         "--served-model-name", "dsv4", "--gpu-memory-utilization", "0.9",
-        "--max-num-seqs", "64", "--data-parallel-size", "1",
+        "--max-num-seqs", "8" if is_prefill else "40",
+        "--data-parallel-size", "1",
         "--tensor-parallel-size", "8", "--enable-expert-parallel",
         "--quantization", "ascend", "--block-size", "128", "--enable-prefix-caching",
-        "--compilation-config", '{"cudagraph_mode": "FULL_DECODE_ONLY"}',
+        "--enforce-eager",
         "--kv-transfer-config", json.dumps(cfg, separators=(",", ":")),
         "--additional-config",
         '{"ascend_compilation_config":{"enable_npugraph_ex":false,"enable_static_kernel":false},"enable_cpu_binding":true,"enable_dsa_cp":true,"multistream_overlap_shared_expert":true}',
