@@ -34,7 +34,7 @@ def build_args(port, is_prefill):
     args = [
         MODEL_DIR, "--host", "0.0.0.0", "--port", str(port),
         "--max-model-len", "40960",
-        "--max-num-batched-tokens", "16384" if is_prefill else "256",
+        "--max-num-batched-tokens", "16384" if is_prefill else "8192",
         "--served-model-name", "dsv4", "--gpu-memory-utilization", "0.9",
         "--max-num-seqs", "8" if is_prefill else "40",
         "--data-parallel-size", "1",
