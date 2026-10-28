@@ -34,9 +34,11 @@ EZ9999 AclNN_Inner_Err
 |:-----|:-----|
 | 基准（纯 eager，无 kv 配置） | ✅ 启动成功，输出 "Paris" |
 | 基准 + `--kv-transfer-config MooncakeConnector`（唯一变量） | ❌ 同样 FillKernel/aclnn 崩溃（36 处），profile_run 阶段 |
-| 基准 + `--kv-transfer-config AscendStoreConnector`（唯一变量） | ❌ 待确认（测试 P5 中） |
+| 基准 + `--kv-transfer-config AscendStoreConnector`（唯一变量） | ❌ 同样崩溃（P5 实测确认） |
 
-即：**只要加上任何 kv-transfer-config，eager 也救不了**。推测：连接器的 KV 内存注册/预分配路径（Mooncake 引擎初始化或 shm 分配）触发了同一批坏掉的 NPU 算子。
+即：**只要加上任何 kv-transfer-config，eager 也救不了**。两个连接器单变量实验均已崩溃。
+
+**根因分析（2026-10-28 定稿）**：平台 10-27 下午更新后，一批 NPU 设备算子坏了（561103 属 aclnn 算子内部异常类）。KV 连接器初始化时需在 NPU 上填充/注册 KV buffer，恰好调用坏掉的 fill 算子（aclnnInplaceFillScalar）→ 任何连接器必崩。**这不是 connector 参数可调的问题，调参无法解决。**
 
 **问题给下一位**：
 1. 为什么 kv 连接器的存在会让 profile_run 崩溃？连接器初始化在崩溃前执行了什么算子（内存分配、memset、量化反量化）？
@@ -65,6 +67,13 @@ python3 perf_opt/scripts/start_server_phase5.py --port 8000 --mtp 0 --enforce-ea
 
 # 观察：/tmp/*.log 中 profile_run 阶段的 aclnn 错误
 ```
+
+## 最终执行计划（2026-10-28 定稿）
+
+1. 记录驱动/固件版本留证（version.info + npu-smi），供平台工单对比 10-26 状态
+2. 试一次 MC_FORCE_TCP=1 排除 RDMA 变量（预期仍崩，只做一次、记录结果）
+3. 阶段 6 收尾：/tmp 产物归集 git、final report 固化 1588.6 tok/s 成果；tag perf-opt-final
+4. PD 待平台确认修复后按 PD_HANDOFF_1028.md 第 6 节执行
 
 ## 平台恢复后的完整验证步骤
 

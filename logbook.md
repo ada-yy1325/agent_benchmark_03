@@ -1,3 +1,30 @@
+## 2026-10-28 — PD 攻坚第三回合：Mooncake 方案 + 平台回归定性 + 收尾计划
+
+---
+
+### 一、做了什么
+
+1. 按官方教程引入 **Mooncake PD 方案**：mooncake-transfer-engine 0.3.13.post1 安装成功；vllm 0.23 工厂已注册 MooncakeConnector（无教程中的 MooncakeLayerwiseConnector 名）；proxy 脚本在 mooncake/vllm_v1_proxy_server.py。start_pd_v2.py 已改造为 Mooncake 版（P/D 差异化 batched 16384/256→8192、max-model-len 40960、enforce-eager）。
+2. **发现 eager 绕过**：平台回归只打坏图编译路径，`--enforce-eager` 普通服务器可正常启动并输出（"Paris"）。
+3. 单变量实验定性的最终结论：
+   - 纯 eager 基准 ✅
+   - 基准+MooncakeConnector ❌（36 处 fill/aclnn 崩溃）
+   - 基准+AscendStoreConnector ❌（P5 实测）
+   - **任何 KV 连接器在 eager 下也必崩**——连接器初始化在 NPU 上填充 KV buffer，恰好调用平台坏掉的 fill 算子（561103 类）。调参无解。
+4. 修正过程中解决的小问题：max-model-len 上限 40960（模型 config 限制）、speculative 方法名必须走 v2 启动路径、batched=256 形状触发 dynamic_quant 参数错误（改 8192 后仍有其他算子崩溃）。
+
+### 二、最终计划（执行中）
+
+① 记录 version.info + npu-smi 版本留证（供平台工单对比 10-26）② MC_FORCE_TCP=1 试一次排 RDMA ③ 阶段 6 收尾固化 1588.6 tok/s ④ PD 待平台修复后按 PD_HANDOFF_1028.md 第 6 节执行。
+
+### 三、资产
+
+- 报告：`perf_opt/PD_ISSUE_REPORT_1028.md`（含复现命令与给下一位的问题）
+- 启动器：`start_pd_v2.py` Mooncake 版（git 3cd1d50 等）
+- 教训：平台坏算子时，任何 NPU 侧内存填充都会触发崩溃；先查 version.info 对比版本变化再折腾配置。
+
+---
+
 ## 2026-10-27（晚）— PD 攻坚第二回合：全哈希补丁完成 + 发现平台环境回归
 
 ---
