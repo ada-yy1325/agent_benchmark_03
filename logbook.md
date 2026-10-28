@@ -1,3 +1,9 @@
+### 补记（13:30）：网络恢复后完成遗留两项
+
+- ✅ 版本留证：`env/platform_evidence_1028.md`（force-add 入库）：npu-smi 25.0.rc1.1、torch_npu 2.11.0.rc4、CANN 9.0.0；空闲 HBM 基线 ~3.4GB/卡（解释了旧采样器的 3406 读数）
+- ✅ MC_FORCE_TCP=1 单次实验：失败方式不同——`Mooncake is not available`（NPU 版引擎不支持 TCP 模式），worker 侧仍伴随 fill 崩溃。已记录，不重复
+
+---
 ## 2026-10-28 — PD 攻坚第三回合：Mooncake 方案 + 平台回归定性 + 收尾计划
 
 ---

@@ -68,12 +68,12 @@ python3 perf_opt/scripts/start_server_phase5.py --port 8000 --mtp 0 --enforce-ea
 # 观察：/tmp/*.log 中 profile_run 阶段的 aclnn 错误
 ```
 
-## 最终执行计划（2026-10-28 定稿）
+## 最终执行计划（2026-10-28 定稿，已执行完毕）
 
-1. 记录驱动/固件版本留证（version.info + npu-smi），供平台工单对比 10-26 状态
-2. 试一次 MC_FORCE_TCP=1 排除 RDMA 变量（预期仍崩，只做一次、记录结果）
-3. 阶段 6 收尾：/tmp 产物归集 git、final report 固化 1588.6 tok/s 成果；tag perf-opt-final
-4. PD 待平台确认修复后按 PD_HANDOFF_1028.md 第 6 节执行
+1. ✅ 版本留证：`env/platform_evidence_1028.md`（npu-smi 25.0.rc1.1 / torch_npu 2.11.0.rc4 / CANN 9.0.0 / 节点 416）
+2. ✅ MC_FORCE_TCP=1 单次实验（已记录，不重复）：失败方式不同——`Mooncake is not available`（NPU 版引擎 TCP 模式不可用），worker 侧仍伴随 fill 崩溃。排除 RDMA 变量无果，与根因判断一致
+3. ✅ 阶段 6 收尾完成（git 5265819/977037d；1588.6 tok/s 成果已固化）
+4. ⏳ PD 待平台确认修复后按 PD_HANDOFF_1028.md 第 6 节执行
 
 ## 平台恢复后的完整验证步骤
 
