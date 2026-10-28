@@ -1,3 +1,29 @@
+# 2026-10-28（下午/晚）— PD 攻坚第四回合：真根因（静态内核误删）修复 + PD 双服务首次跑通 + KV 池机制完整解剖
+
+## 一、做了什么
+
+1. **推翻"连接器必崩"结论，定位真根因**：`start_pd_v2.py` 启动时的"清理"步骤 `rm -rf opp/static_kernel/static_kernel_*` 误删了镜像构建时预编译的 8 个静态内核包（bisheng-compiler ≥8.5 编译，10-26 15:12-15:24 生成，平台运行时不会再生）。任何 aclnn 算子走静态路径时按 `binary_info_config.json` 查 binPath → 缺失 → 561103 / FillAiCore 硬崩。之前所有 eager/连接器/图模式"崩溃"全是被删内核的表现；E1 成功是因为手动启动没走清理。
+2. **修复（全部最小改动）**：① `config.ini` 清空 load_priority（备份 .bak）+ `binary_info_config.json` 置空（备份 .bak）→ 强制动态编译回退；② v2/v3 启动器清理命令改无害 ls；③ v2 `enable_static_kernel:false`（保留图模式）。真机验证链：独立 fill OK → 迷你图捕获 CAPTURE+FILL OK → **FINAL6/FINAL7 PD 双服务（8000 prefill + 8001 decode）完整启动，零报错**。
+3. **4K 两阶段验证**：producer 3.2s（prefill 2768 tok），consumer TTFT 0.316s。多轮测试确认该 TTFT 即 consumer 本地 prefill 速度（~9K tok/s 空闲），非池命中。
+4. **流水线基准（32×4K 并发）**：consumer TTFT p50 7.4-9.5s，consumer 全量本地重算（日志 prompt throughput ~4900 tok/s ≈ 13 万 token）。调大 kv_buffer_size 至 8GB、加 post-delay 3s、lookahead 1 均无效——池从未工作。
+5. **探针矩阵定位**（站点包临时插桩，已全部清除）：调度器调用了 connector（PDDBG3✓）、函数进入（PDDBG0✓、consumer_is_to_load=True），但 **`cache_transfer_granularity=16384` 闸门**：DSV4 MLA 压缩组（ratio 128）把池传输粒度顶到 16384 token，`discard_partial_chunks=True` 下任何 <16384 token 的 prompt 直接 return 0 不 lookup。
+6. **17.5K prompt 终测**：过了闸门，lookup 真正执行（2190 个哈希）→ **hit=0**。根因：`save_kv_layer` 在 `use_layerwise=False` 时直接 return，model_runner 也不调用——**非 layerwise 模式下 producer 没有任何保存路径执行，池永远为空**。
+
+## 二、结论（诚实版）
+
+- PD 机制在**当前配置**下未产生 TTFT 收益：<16K prompt 被 16384 粒度闸门硬挡；≥16K 时 producer 保存路径未触发（需 `use_layerwise:true` 才能激活逐层保存）。
+- 下一个攻克方向：两侧 `kv_connector_extra_config` 加 `use_layerwise:true`，用 ≥16384 token prompt 验证 save→lookup→load 全链路。
+- 环境已修复的重大意义：静态内核误删是**所有历史崩溃的总根源**，修复后常规/PD 服务器均可正常启动（图模式+动态内核），MTP 等历史配置不受影响。
+
+## 三、资产
+
+- 文档：`perf_opt/PD_HANDOFF_1028.md`（PD 完整操作手册，含静态内核陷阱与 16384 闸门）、`perf_opt/PD_ISSUE_REPORT_1028.md`（根因定案+证据链）、`perf_opt/summary/full_optimization_summary.md`（PD 实验数据章节）
+- 脚本：`pd_4k_two_phase.py`（两阶段验证客户端，支持任意 prompt 长度）、`pd_pipeline_bench.py`（新增 --post-delay 参数）
+- 提交：d95214b（三处修复+验证脚本）、406a145（kv_buffer_size 8GB）
+- 远端站点包最终状态：full-hash 补丁×2、connector 修复×1 保留；全部调试探针已清除；config.ini/binary_info_config.json 已清空（.bak 备份在旁）
+
+---
+
 ### 补记（13:30）：网络恢复后完成遗留两项
 
 - ✅ 版本留证：`env/platform_evidence_1028.md`（force-add 入库）：npu-smi 25.0.rc1.1、torch_npu 2.11.0.rc4、CANN 9.0.0；空闲 HBM 基线 ~3.4GB/卡（解释了旧采样器的 3406 读数）

@@ -166,7 +166,23 @@ ASCEND_RT_VISIBLE_DEVICES=8,9,10,11,12,13,14,15 python3 perf_opt/scripts/start_s
 | 离线批量（追求吞吐） | **配置 B（MTP=ON）** | 聚合 1588.6 tok/s，比 MTP=OFF 版再高 48% |
 | 单机高吞吐（16 卡要分给别的任务） | 配置 A @c32 | 781.8 tok/s |
 
-## 六、资产索引
+## 六、PD（prefill/decode）分离实验（2026-10-28，探索性，未达收益）
+
+**目标**：通过 prefill（卡 0-7）/ decode（卡 8-15）双服务 + AscendStore KV 池共享，改善 TTFT 与 output tok/s。对照：配置 B 聚合 1588.6 tok/s @c32；统一服务器 c32 TTFT 4114ms。
+
+**过程突破**：定位并修复了历史上所有服务器崩溃的总根源——启动脚本误删镜像预编译静态内核包（561103/FillAiCore），修复后 PD 双服务首次完整启动（动态内核 + 图模式，零报错）。
+
+**实测数据**（动态内核，吞吐数字不可与静态内核基线直接对比）：
+
+| 实验 | 配置 | 结果 |
+|:-----|:-----|:-----|
+| 4K 两阶段（单请求） | 2768-token prompt | producer 3.2s；consumer TTFT 0.316s（=本地 prefill，非池命中） |
+| 流水线 32×4066 | lookahead 4 / 1、池 500MB/8GB、post-delay 3s | consumer TTFT p50 7.4-9.5s；输出 145-184 tok/s；零池命中 |
+| 17.5K 两阶段 | 过 16384 粒度闸门 | lookup 执行（2190 哈希）→ hit=0（保存路径未触发） |
+
+**结论（诚实版）**：KV 池端到端传输未打通，当前配置 PD 无收益。已定位三因：① 16384 token 粒度闸门（DSV4 MLA 压缩比 128 所致，<16K prompt 永不 lookup）；② producer 保存路径在 use_layerwise=False 时不执行（下一步：两侧加 `use_layerwise:true` 再测）；③ kv_buffer_size 配置不生效（psm 恒 ~251MB）。完整手册与踩坑见 `perf_opt/PD_HANDOFF_1028.md`。
+
+## 七、资产索引
 
 - 数据：`results/mtp_model/`（单服务 11 点 + GPQA + 一致性）、`results/verify_1026/`（2026-10-26 双服务 MTP 补测 4 点 + 显存/fp8 核实记录）
 - 总表：`summary/final_report_table.{json,csv}` ｜ 明细：`summary/final_report.md` ｜ 本文件

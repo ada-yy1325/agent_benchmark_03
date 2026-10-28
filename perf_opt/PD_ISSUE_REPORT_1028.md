@@ -16,6 +16,18 @@
    - `start_pd_v2.py` 的 `enable_static_kernel: true → false`（动态 JIT 跑通；静态内核后续可用 torch_npu 的 compile_static_kernel 再生恢复性能）
 6. 验证结果：迷你图捕获测试 `CAPTURE+FILL OK`；PD 双服务器 FINAL6 启动成功（decode 8001 + prefill 8000 双 200）；4K 两阶段验证 **consumer TTFT=0.316s**（producer 本地 prefill ~1.4s），2768-token prompt 全量命中池，**full-hash 补丁生效**。
 
+> **更正（10-28 晚间探针实测）**：上一条"consumer TTFT 0.316s = 池命中"是误读——producer 自己的 TTFT 指标同为 0.308s，即两者都是本地 prefill（空闲单请求 ~9K tok/s，2768 token ≈ 0.3s）。池从未工作过。
+
+## 🎯 KV 池未打通的三个原因（2026-10-28 晚间定稿，探针矩阵实测）
+
+探针法（调度器调用点→函数入口→lookup 后→producer 应答者四处插桩）定位结果：
+
+1. **16384 token 粒度闸门**：`cache_transfer_granularity = lcm(128, 各组 128×compress_ratio)`，DSV4 MLA 压缩组 ratio=128 → 16384。`get_num_new_matched_tokens` 对 `token_len < 16384` 直接 return 0（discard_partial_chunks 时先向下取整）。→ 我们测的 2772/4066 token 全部被挡，从未 lookup。
+2. **producer 保存路径未触发**：`save_kv_layer` 开头 `if not self.use_layerwise: return`；非 layerwise 模式下无任何保存执行。17.5K prompt 过了闸门、lookup 真正执行（2190 哈希）→ hit=0，池空。
+3. **kv_buffer_size 配置不生效**：/dev/shm psm 实测恒 ~251MB（8GB 配置亦然）；17.5K 请求的 KV ≈250MB 已贴容量线。
+
+修复建议（给下一位）：① 两侧 `kv_connector_extra_config` 加 `"use_layerwise": true` 激活逐层保存；② 用 ≥16384 token prompt 验证；③ 池容量若可调再加大。
+
 ## 目标
 
 在昇腾 910B2C ×16 上给 DeepSeek-V4-Flash（W8A8 量化）做 PD（prefill/decode）分离，改善 TTFT 与 output tok/s。对比基准：双服务 MTP=ON 聚合 1588.6 tok/s @c32；统一服务器 c32 TTFT 4114ms。
