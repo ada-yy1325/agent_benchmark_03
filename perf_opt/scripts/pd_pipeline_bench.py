@@ -88,6 +88,9 @@ def main():
     ap.add_argument("--num-requests", type=int, default=32)
     ap.add_argument("--consumer-concurrency", type=int, default=32)
     ap.add_argument("--lookahead", type=int, default=4)
+    ap.add_argument("--post-delay", type=float, default=0.0,
+                    help="sleep this long in consumer after popping a request "
+                         "(producer-side KV save may be async)")
     args = ap.parse_args()
 
     from transformers import AutoTokenizer
@@ -136,6 +139,7 @@ def main():
                     time.sleep(0.01)
                     continue
                 i, text = cons_queue.pop(0)
+            time.sleep(args.post_delay)
             res = consumer_call(client, text)
             with lock:
                 if res["ok"]:
