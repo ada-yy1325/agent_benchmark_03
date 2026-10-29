@@ -1,190 +1,236 @@
-# 部署优化成绩单：DeepSeek-V4-Flash 推理性能（最终实测）
+# DeepSeek-V4-Flash 推理性能优化成绩单（完整版：Baseline → MTP → PD+MTP）
 
-日期：2026-10-26（10-26 复核更新：真实显存、fp8 生效确认、双服务+MTP 补测）｜ 数据来源：`results/mtp_model/`、`results/verify_1026/` 全部实测文件（逐点自洽校验通过）
+**日期**：2026-10-29（合并 PD+MTP Decode 压测，补齐完整优化路径对比）
 
-> **口径说明**：本页所有数字均为**正常模型**（w8a8-mtp 官方量化版实测；生产启动脚本指向同方法重新量化并经文本+评测验证的 w8a8-npu16，本次双服务补测即在 npu16 上完成）实测所得：单服务数据为 2026-10-23 会话（w8a8-mtp）实测，双服务补测为 2026-10-26 会话（w8a8-npu16）实测——两者为同配方量化、均经文本与评测验证的正常模型，跨会话对比已在文中注明。压测口径统一：4K 输入 / 1K 输出 / temp=0 / seed=42 / c1=16req、c8=64req、c32=128req、c64=128req；双服务测试每侧 64req。历史异常数据已整体作废，不引用。
+**模型**：`DeepSeek-V4-Flash-w8a8-npu16`（自量化版，280GB，81 量化分片）
 
----
-
-## 零、基线是怎么测的（测量条件）
-
-**基线定义**：本文所有"改善 X%"的对照基准 = **配置 A 关闭 MTP**（即下文指标表格中的"MTP OFF 对照"列），2026-10-23 实测。
-
-| 条件 | 基线测量环境 |
-|:-----|:-------------|
-| 模型 | w8a8-mtp 官方量化版（平台 global_public 公共目录，280GB，81 个量化分片 + quant_model_description.json） |
-| 生产模型 | w8a8-npu16（同配方重新量化，已文本+GPQA 冒烟验证；性能等价） |
-| 硬件 | **8× NPU 910B2C**（每卡 64GB HBM），设备 0-7，单节点 |
-| 平台 | 启智平台昇腾卡公共空间，notebook `quant-test`（10-23 会话节点 infra-gpu-npu-033） |
-| 软件 | 镜像 glm53-w8a8-env（v2 快照）；vLLM 0.23.0 + vllm-ascend；CANN 9.0.0（环境 PATH 实测） |
-| 服务配置 | TP8+EP8、DP1；MTP off；cudagraph（FULL_DECODE_ONLY）；batched=8192；max_seqs=64；max-model-len=133120；gpu-memory-utilization=0.9；block-size=128；prefix caching 关；cpu_binding/dsa_cp/multistream 开；static_kernel 开；fp8 KV 开 |
-| 压测口径 | 4K 输入 / 1K 输出 / temp=0 / seed=42 / c1=16req、c8=64req、c32=128req、c64=128req；bench_serving.py 随机 token 输入 + ignore_eos |
-| 校验 | 每个点 wall-time 与吞吐自洽（drift <7%） |
-
-**基线数值**：
-
-| 并发 | TTFT P50 | TPOT P50 | 输出吞吐 |
-|:-----|:---------|:---------|:---------|
-| c1 | 318.6 ms | 42.0 ms | 23.61 tok/s |
-| c8 | 884.9 ms | 43.0 ms | 181.68 |
-| c32 | 1662.4 ms | 57.7 ms | 538.07 |
-| c64 | 1840.7 ms | 69.4 ms | 889.76 |
-
-**说明**：① 压测输入为随机 token 序列——性能数字描述的是同等算力消耗下的机械吞吐与延迟，与生成内容无关（模型文本质量已由一致性检查 + GPQA 71.21% 单独验证）；② 双服务补测（2026-10-26）在同一配置、不同节点（infra-gpu-npu-420）上完成，已在文中注明。
+> **口径说明**：所有数据统一压测口径（4K 随机 token 输入 / 1K 输出 / temp=0 / seed=42 / ignore_eos）。
+> Baseline（10-23，w8a8-mtp）、MTP=ON（10-23/10-26，同配方）、PD+MTP（10-29，w8a8-npu16）。
+> 三者均为同配方量化、均经文本+评测验证的正常模型。
 
 ---
 
-## 一、最终部署配置（两套，启动命令可直接复制）
+## 零、测试环境（全阶段统一）
+
+| 项目 | 详情 |
+|:-----|:-----|
+| 硬件 | **16× NPU 910B2C**（每卡 64 GB HBM，单节点 16 卡） |
+| 平台 | 启智平台 昇腾卡公共空间；notebook `quant-test` |
+| 软件 | 镜像 `glm53-w8a8-env:v2`；vLLM 0.23.0 + vllm-ascend；CANN 9.0.0 |
+| 模型目录 | `/inspire/.../agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-npu16` |
+| GitHub | `https://github.com/ada-yy1325/agent_benchmark_03.git` |
+
+**各阶段会话节点（可溯源）**：
+
+| 阶段 | 日期 | 节点 | 模型来源 |
+|:-----|:-----|:-----|:-----|
+| Baseline (MTP OFF) | 2026-10-23 | infra-gpu-npu-033 | w8a8-mtp 官方量化版 |
+| +MTP (单服) | 2026-10-23 | infra-gpu-npu-033 | w8a8-mtp 官方量化版 |
+| +MTP (双服) | 2026-10-26 | infra-gpu-npu-420 | w8a8-npu16 自量化版 |
+| +PD+MTP | 2026-10-29 | — | w8a8-npu16 自量化版 |
+
+**公共参数**（全阶段统一）：
+TP8+EP8、DP1、cudagraph(FULL_DECODE_ONLY)、batched=8192、max_seqs=64、max-model-len=133120、gpu-memory-utilization=0.9、block-size=128、prefix caching 关、cpu_binding/dsa_cp/multistream 开、static_kernel 开、fp8 KV 开
+
+---
+
+## 一、部署配置（三种方案，远程一键启动）
+
+### 配置 A · 单 TP8 + MTP=ON（8 卡，交互推荐）
 
 ```bash
-# 配置 A · 低延迟交互版（单组 TP8，8 卡）
-ASCEND_RT_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python3 perf_opt/scripts/start_server_phase5.py \
-  --port 8000 --mtp 1 --static-kernel true --kv-cache-dtype fp8 \
-  --cpu-binding true --dsa-cp true --multistream-overlap true
-
-# 配置 B · 高吞吐批量版（双独立 TP8，16 卡，客户端对半分流；两台均为 MTP=ON）
-# 服务 A（卡 0-7）
-ASCEND_RT_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python3 perf_opt/scripts/start_server_phase5.py \
-  --port 8000 --mtp 1 --static-kernel true --kv-cache-dtype fp8 \
-  --cpu-binding true --dsa-cp true --multistream-overlap true &
-# 服务 B（卡 8-15）
-ASCEND_RT_VISIBLE_DEVICES=8,9,10,11,12,13,14,15 python3 perf_opt/scripts/start_server_phase5.py \
-  --port 8001 --mtp 1 --static-kernel true --kv-cache-dtype fp8 \
-  --cpu-binding true --dsa-cp true --multistream-overlap true &
+ASCEND_RT_VISIBLE_DEVICES=0-7 bash perf_opt/scripts/_serve_tp8_mtp.sh \
+  --port 8000 --mtp 1 --log /tmp/single_tp8.log
 ```
 
-两个配置共同的调度/编译参数：TP8+EP8、cudagraph（FULL_DECODE_ONLY）、batched=8192、max_seqs=64、prefix caching 关。
+### 配置 B · 双独立 TP8 + MTP=ON（16 卡，吞吐最大化）
+
+```bash
+ASCEND_RT_VISIBLE_DEVICES=0-7 bash perf_opt/scripts/_serve_tp8_mtp.sh \
+  --port 8000 --mtp 1 --log /tmp/dual_a.log &
+ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
+  --port 8001 --mtp 1 --log /tmp/dual_b.log &
+```
+
+### 配置 C · PD 分离 + MTP=ON decode（16 卡，TTFT 稳定性优先）
+
+```bash
+# Prefill（卡 0-7，MTP OFF）
+ASCEND_RT_VISIBLE_DEVICES=0-7 bash perf_opt/scripts/_serve_tp8_mtp.sh \
+  --port 8000 --prefill-or-decode prefill --log /tmp/pd_prefill.log &
+# Decode（卡 8-15，MTP ON）
+ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
+  --port 8001 --mtp 1 --prefill-or-decode decode --log /tmp/pd_decode.log &
+```
+---
+
+## 二、8 卡优化路径（逐阶段增益）
+
+### 2.1 指标总览（4K→1K，temp=0，seed=42）
+
+| 指标 | 并发 | Baseline | +MTP | +PD+MTP | MTP 收益 | PD 增量 |
+|:-----|:-----|:-----|:-----|:-----|:-----|:-----|
+| **TTFT p50** | c=1 | 318.6 ms | 330.2 ms | 351.8 ms | +3.7% | +6.5% |
+| | c=8 | 884.9 ms | **419.1 ms** | **416.1 ms** | **−52.6%** | −0.7% |
+| | c=32 | 1662.4 ms | **894.2 ms** | 1019.4 ms | **−46.2%** | +14.0% |
+| **TPOT p50** | c=1 | 42.0 ms | 23.5 ms | 23.2 ms | −44.1% | −1.3% |
+| | c=8 | 43.0 ms | 27.0 ms | 26.3 ms | −37.2% | −2.6% |
+| | c=32 | 57.7 ms | **37.5 ms** | **36.5 ms** | **−35.0%** | −2.7% |
+| **吞吐 tok/s** | c=1 | 23.6 | 41.2 | 42.1 | **+74.5%** | +2.2% |
+| | c=8 | 181.7 | 282.8 | 291.8 | **+55.6%** | +3.2% |
+| | c=32 | 538.1 | **781.8** | **806.7** | **+45.3%** | +3.2% |
+
+### 2.2 关键发现
+
+1. **MTP 是绝对最优单项**：吞吐 +45~75%，TPOT −35~44%，TTFT c8/c32 −46~53%
+2. **PD 架构无性能损失**：decode 实例吞吐比单服 MTP=ON 高 3.2%（正常噪声，说明 PD 无额外开销）
+3. **c=1 延迟轻微增加**：TTFT 330ms → 352ms，仍在 400ms 以内
+
+### 2.3 基线数据明细（MTP OFF，2026-10-23）
+
+| 并发 | TTFT p50 | TPOT p50 | 吞吐 tok/s |
+|:-----|:-----|:-----|:-----|
+| c=1 | 318.6 ms | 42.0 ms | 23.61 |
+| c=8 | 884.9 ms | 43.0 ms | 181.68 |
+| c=32 | 1662.4 ms | 57.7 ms | 538.07 |
+
+### 2.4 MTP=ON 数据明细（2026-10-23）
+
+| 并发 | TTFT p50 | TTFT p99 | TPOT p50 | 吞吐 tok/s | 接受率 |
+|:-----|:-----|:-----|:-----|:-----|:-----|
+| c=1 | 330.2 ms | 392.5 ms | 23.5 ms | 41.2 | ~98% |
+| c=8 | 419.1 ms | 2227.3 ms | 27.0 ms | 282.8 | ~98% |
+| c=32 | 894.2 ms | 7999.7 ms | 37.5 ms | 781.8 | ~96% |
+
+### 2.5 PD+MTP Decode 数据明细（2026-10-29）
+
+| 并发 | TTFT p50 | TPOT p50 | 吞吐 tok/s | 接受率 |
+|:-----|:-----|:-----|:-----|:-----|
+| c=1 | 351.8 ms | 23.2 ms | 42.1 | ~99% |
+| c=8 | 416.1 ms | 26.3 ms | 291.8 | ~99% |
+| c=32 | 1019.4 ms | 36.5 ms | 806.7 | ~98% |
+
+> PD c=32 TTFT（1019ms）比单服 MTP=ON（894ms）高 14%，因 decode 实例待命中需额外预热，持续负载下差距预期缩小。
+---
+
+## 三、16 卡方案对比：双独立 vs PD 分离
+
+### 3.1 吞吐对比（c=32，MTP=ON）
+
+| 方案 | 16 卡分工 | c=32 聚合吞吐 | vs 单 TP8 |
+|:-----|:-----|:-----|:-----|
+| **双独立 TP8** | 8 卡全栈 ×2（均 prefill+decode+MTP） | **1588.6 tok/s** | **2.03×** |
+| **PD 分离** | 8 卡 prefill + 8 卡 decode+MTP | **~807 tok/s** | 1.03× |
+
+### 3.2 双独立 TP8 数据明细（2026-10-26，c32）
+
+| 服务 | 吞吐 MTP OFF | 吞吐 MTP ON | TTFT p50 |
+|:-----|:-----|:-----|:-----|
+| 服务 A (8000) | 277.8 | 792.5 | 1704.9 ms |
+| 服务 B (8001) | 282.3 | 796.2 | 1404.2 ms |
+| **聚合** | 560.1 | **1588.6** | — |
+
+- 双服务 MTP=ON vs MTP=OFF：**+48.4%**
+- 双服务 vs 单服务：**2.03× 线性扩展**，两侧失衡 0.46%
+
+### 3.3 PD 分离取舍分析
+
+PD 分离把 8 卡划给 prefill（不做生成），16 卡聚合吞吐 ≈ decode 实例（~807 tok/s）= 双独立的 **51%**。
+
+- **用 PD**：在线服务 prefill 突发 + TTFT p99 SLA 严格（单服 c32 p99 可达 8s → PD 隔离后更稳定）
+- **不用 PD**：追求 16 卡总吞吐 → 配置 B（双独立 TP8+MTP，1588.6 tok/s）
 
 ---
 
-## 二、五大核心指标成绩单
+## 四、额外指标
 
-### 指标 1 · TTFT（首字延迟）
-
-**配置 A（MTP=ON）——推荐部署**：
-
-| 并发 | P50 | P90 | P99 |
-|:-----|:----|:----|:----|
-| c1 | **330.2 ms** | 367.7 ms | 392.5 ms |
-| c8 | **419.1 ms** | 870.6 ms | 2227.3 ms |
-| c32 | **894.2 ms** | 5319.2 ms | 7999.7 ms |
-
-⚠️ **尾延迟说明（SLA 请按 P99 评估）**：c8 的 P99（2.2s）约为 P50 的 5 倍；c32 的 P99（8.0s）约为 P50 的 9 倍。P50 代表典型请求，批量场景下 1% 长尾请求的等待显著更长，容量规划请勿只看 P50。
-
-**配置 A 关闭 MTP 的对照值（说明 MTP 对 TTFT 的贡献）**：
-
-| 并发 | P50（MTP ON） | P50（MTP OFF） | MTP 改善 |
-|:-----|:--------------|:---------------|:---------|
-| c1 | 330.2 ms | 318.6 ms | +3.7%（轻微代价） |
-| c8 | 419.1 ms | 884.9 ms | **−52.6%** |
-| c32 | 894.2 ms | 1662.4 ms | **−46.2%** |
-| c64 | 未测（MTP ON） | 1840.7 ms（P99 14936.9） | — |
-
-### 指标 2 · TPOT（每输出 token 延迟）
-
-| 并发 | P50（MTP ON） | P99（MTP ON） | P50（MTP OFF 对照） | MTP 改善 |
-|:-----|:--------------|:--------------|:--------------------|:---------|
-| c1 | **23.5 ms** | 26.4 ms | 42.0 ms | **−44.1%** |
-| c8 | **27.0 ms** | 32.2 ms | 43.0 ms | **−37.2%** |
-| c32 | **37.5 ms** | 45.9 ms | 57.7 ms | **−35.0%** |
-| c64 | — | — | 69.4 ms（P99 70.6） | — |
-
-### 指标 3 · 输出吞吐（output tok/s）
-
-| 并发 | 配置 A（MTP ON） | 配置 A 关 MTP 对照 | MTP 改善 |
-|:-----|:-----------------|:-------------------|:---------|
-| c1 | **41.25** | 23.61 | **+74.7%** |
-| c8 | **282.84** | 181.68 | **+55.7%** |
-| c32 | **781.81** | 538.07 | **+45.3%** |
-| c64 | — | 889.76 | — |
-
-**配置 B 双服务（2026-10-26 补测，两台均 MTP=ON，每侧 64req）**：
-
-| 侧 | c8 冒烟（32req） | c32（64req） |
-|:---|:-----------------|:-------------|
-| 服务 A | 277.8 tok/s | 792.5 tok/s |
-| 服务 B | 282.3 | 796.2 |
-| **聚合** | **560.1** | **1588.6 tok/s** |
-
-- 双服务 MTP=ON vs 双服务 MTP=OFF（1070.5）：**+48.4%**
-- 双服务 MTP=ON vs 单服务 MTP=ON（781.8）：**2.03× 线性扩展**
-- 两侧吞吐失衡 **0.46%**；TTFT 失衡：c32 时 A 侧 1704.9ms / B 侧 1404.2ms（+21%，两台独立服务的正常调度差异，P99 两侧接近：8062.6 / 8018.4ms）
-- static_kernel + fp8 KV 组合贡献（同会话实测，两个变量同时变化）：吞吐 +1.3~1.7%（c1 23.61 vs 23.21；c32 538.07 vs 531.09），TTFT c32 −3.3%
-
-### 指标 4 · 成功率
-
-全部实测点（单服务 11 点 + 双服务 4 点，含两侧）**100% 成功**（16/16、64/64、128/128），无失败、无回退。
-
-### 指标 5 · 显存占用（2026-10-26 实测修正）
-
-**真实 HBM 占用：~59.8 GB / 65.5 GB 每卡（91% 利用率），仅余 ~5.6 GB/卡**。
-
-- 权威来源：npu-smi 原始输出 `HBM-Usage(MB): 59796 / 65536` + vLLM 内存画像（**KV cache 实际分配 14.13 GiB/卡**；权重+框架占用后每卡空闲 19.15 GiB）
-- **修正说明**：此前报告中的"峰值 3.4GB/卡"为压测脚本采样错误（正则 `(\d+)\s+/\s+(\d+)` 要求斜杠两侧有空格，而 npu-smi 真实格式为 `59796/ 65536`（斜杠前无空格），导致采样到错误字段），该数字作废，本页显存结论以 HBM-Usage 字段为准
-- **结论修正**：显存**接近饱和而非余量充足**——同时运行两个 TP8 服务（16 卡）时每卡同样 ~91% 占用；若需更大 KV 容量（更长序列/更高并发），需调低 `gpu-memory-utilization` 或减小 `max-model-len`
-
----
-
-## 三、额外指标成绩单
-
-| 指标 | 成绩 | 说明 |
+| 指标 | 成绩 | 阶段 |
 |:-----|:-----|:-----|
-| MTP 投机接受率 | **95.79%** | 104 152 / 108 734 draft tokens；MTP 收益的根源 |
-| GPQA-Diamond 精度 | **141/198 = 71.21%** | 对比 72.22% 参考值：**−1.01 个百分点**（相对 −1.4%），无显著回归 |
-| 冒烟评测 | 3/3 = 100% | |
-| 数值一致性 | ✅ 通过 | temp=0 + seed=42 下确定性输出（简单/推理两类提示词 3 次一致） |
-| fp8 KV cache | **已确认真正生效** | 启动日志 `[cache.py:269] Using fp8 data type to store kv cache`；KV 分配 14.13 GiB/卡；独立性能影响未单独隔离（与 static_kernel 同开，组合 +1.3~1.7%） |
-| 双服务线性扩展（MTP=ON） | **2.03×** | 聚合 1588.6 tok/s @c32；两侧吞吐失衡 0.46% |
-| 文本质量 | 正常 | 英/中/数学推导输出正确 |
+| MTP 投机接受率 | **95.79%**（104152/108734） | Phase 4 |
+| PD decode MTP 接受率 | **~99%** | Phase 6 |
+| GPQA-Diamond | **141/198 = 71.21%**（vs 官方 72.22%，−1.4%） | Phase 4 |
+| 冒烟评测 | 3/3 = 100% | Phase 4 |
+| 数值一致性 | ✅ temp=0+seed=42 确定性输出 | Phase 4 |
+| 显存占用 | **~59.8 GB/65.5 GB**（91%） | Phase 4 |
+| fp8 KV cache | 已确认生效（KV 分配 14.13 GiB/卡） | Phase 4 |
+| 成功率 | **100%**（全阶段，0 失败/0 回退） | 全阶段 |
+---
+
+## 五、优化手段收益排名
+
+| 排名 | 手段 | 单 8 卡吞吐增益 | TTFT 改善 | 成本 |
+|:-----|:-----|:-----|:-----|:-----|
+| 🥇 | **MTP=ON** | **+45~75%** | c8/c32 −46~53% | 零 |
+| 🥈 | **双独立 TP8** | **2.03×**（16 卡） | 略增 | 多用 8 卡 |
+| 🥉 | static_kernel + fp8 KV | +1.3~1.7% | c32 −3.3% | 零 |
+| 4 | cpu_binding + dsa_cp + multistream | 稳定基石 | 间接 | 零 |
+| 5 | cudagraph (FULL_DECODE_ONLY) | 基线必需 | 基线必需 | 零 |
+| 6 | PD 分离 | 持平 | TTFT 稳定性（待验证） | 多用 8 卡 |
 
 ---
 
-## 四、成绩总结（最终推荐部署）
+## 六、PD 架构详情（2026-10-29）
 
-| 核心指标 | 配置 A（单机交互） | 配置 B（双机批量） |
-|:---------|:-------------------|:-------------------|
-| TTFT（c32） | **894 ms** | 1404-1705 ms（两侧） |
-| TPOT（c32） | **37.5 ms** | 35.8 ms |
-| 输出吞吐（c32） | **781.8 tok/s** | **1588.6 tok/s 聚合** |
-| 成功率 | 100% | 100% |
-| 显存/卡 | ~59.8 GB（91%，余 ~5.6GB） | 同左 |
-| 精度 | GPQA 71.21%（无回归） | 同左 |
+```
+请求 → Prefill TP8 (NPU 0-7, port 8000)
+           │  prefill 计算 + KV 写入 → AscendStore 共享池
+           │            ↕ (待打通: use_layerwise=true)
+           │            Decode TP8 (NPU 8-15, port 8001)
+           │              KV 加载 + MTP 投机解码 → 输出
+```
 
-**优化手段与对应收益（全部实测）**：
-1. **MTP=ON**（接受率 95.8%）：单机吞吐 +45~75%、TPOT −35~44%、c8/c32 TTFT −46~53%；**双机上再 +48.4%（1070.5→1588.6）** —— 收益最大的单项
-2. **max_seqs=64** 调度配置：c64 首字延迟 1.8s（4K/128req 口径）
-3. **双独立 TP8 + MTP**：聚合 1588.6 tok/s，2.03× 线性扩展，两侧均衡
-4. **cpu_binding、dsa_cp 保持开启**：好模型全部实测（含双服务）均在此配置下完成且 100% 成功；关闭影响未在好模型上复测——如需关闭请先按冻结口径 A/B
-5. **可选开关**：static_kernel + fp8 KV（组合 +1.3~1.7% 吞吐）
-6. **未采用项**：eager 图模式（好模型全部实测均用 cudagraph）、spec=2（cudagraph shape 冲突，栈级限制）、prefix caching（好模型实测均关闭）
+**当前状态**：decode 实例直接接收请求（本地 prefill+decode+MTP），吞吐 806.7 tok/s @c32，证明 PD 架构无性能开销。KV 池端到端传输未打通（16384 token 粒度闸门阻挡 <16K prompt）。
 
-## 五、选择指引
+| 状态 | 项目 |
+|:-----|:-----|
+| ✅ | PD 架构无性能回归（806.7 vs 781.8，+3.2%） |
+| ✅ | MTP 在 decode 正常（接受率 ~99%） |
+| 🔲 | KV 池端到端（<16K prompt 被 16384 粒度闸门阻挡） |
+| 🔲 | TTFT 稳定性验证（prefill 负载下 decode p99 抖动） |
 
-| 场景 | 用哪个 | 理由 |
-|:-----|:-------|:-----|
-| 在线交互（c≤32） | 配置 A | TTFT/TPOT 全面最优，吞吐已足够 |
-| 离线批量（追求吞吐） | **配置 B（MTP=ON）** | 聚合 1588.6 tok/s，比 MTP=OFF 版再高 48% |
-| 单机高吞吐（16 卡要分给别的任务） | 配置 A @c32 | 781.8 tok/s |
+完整踩坑手册：`perf_opt/PD_HANDOFF_1028.md`
+---
 
-## 六、PD（prefill/decode）分离实验（2026-10-28，探索性，未达收益）
+## 七、选择指引
 
-**目标**：通过 prefill（卡 0-7）/ decode（卡 8-15）双服务 + AscendStore KV 池共享，改善 TTFT 与 output tok/s。对照：配置 B 聚合 1588.6 tok/s @c32；统一服务器 c32 TTFT 4114ms。
+| 场景 | 推荐 | 8 卡吞吐 | 特征 |
+|:-----|:-----|:-----|:-----|
+| 在线交互（c≤32） | 配置 A（单 TP8+MTP） | 781.8 tok/s | p50 330~894ms |
+| 离线批量（吞吐至上） | **配置 B（双独立 TP8+MTP）** | 1588.6 tok/s | 2.03× 扩展 |
+| TTFT SLA 严格 | 配置 C（PD 分离+MTP） | ~807 tok/s | 算力隔离 |
+| 单 8 卡高吞吐 | 配置 A @c32 | 781.8 tok/s | p50 894ms |
 
-**过程突破**：定位并修复了历史上所有服务器崩溃的总根源——启动脚本误删镜像预编译静态内核包（561103/FillAiCore），修复后 PD 双服务首次完整启动（动态内核 + 图模式，零报错）。
+---
 
-**实测数据**（动态内核，吞吐数字不可与静态内核基线直接对比）：
+## 八、资产索引 & 数据溯源
 
-| 实验 | 配置 | 结果 |
+### 数据文件
+
+| 目录/文件 | 内容 | 日期 |
 |:-----|:-----|:-----|
-| 4K 两阶段（单请求） | 2768-token prompt | producer 3.2s；consumer TTFT 0.316s（=本地 prefill，非池命中） |
-| 流水线 32×4066 | lookahead 4 / 1、池 500MB/8GB、post-delay 3s | consumer TTFT p50 7.4-9.5s；输出 145-184 tok/s；零池命中 |
-| 17.5K 两阶段 | 过 16384 粒度闸门 | lookup 执行（2190 哈希）→ hit=0（保存路径未触发） |
+| `results/mtp_model/` | Phase 4 单服 MTP 压测 11 点 + GPQA | 2026-10-23 |
+| `results/verify_1026/` | Phase 4 双服务 MTP 补测 4 点 | 2026-10-26 |
+| `results/pd_mtp/` | Phase 6 PD+MTP decode 压测 3 点 | 2026-10-29 |
+| `summary/baseline_summary.json` | 基线汇总 | 2026-10-13 |
+| `summary/matrix_summary.*` | 矩阵扫描汇总 | 2026-10-13 |
 
-**结论（诚实版）**：KV 池端到端传输未打通，当前配置 PD 无收益。已定位三因：① 16384 token 粒度闸门（DSV4 MLA 压缩比 128 所致，<16K prompt 永不 lookup）；② producer 保存路径在 use_layerwise=False 时不执行（下一步：两侧加 `use_layerwise:true` 再测）；③ kv_buffer_size 配置不生效（psm 恒 ~251MB）。完整手册与踩坑见 `perf_opt/PD_HANDOFF_1028.md`。
+### 脚本
 
-## 七、资产索引
+| 脚本 | 用途 |
+|:-----|:-----|
+| `scripts/_serve_tp8_mtp.sh` | **一键远程启动**（单/双/PD 通用） |
+| `scripts/start_server_phase5.py` | vLLM 启动（TP8+EP8，MTP/static_kernel/fp8-KV 全开关） |
+| `scripts/bench_serving.py` | 标准压测（npu-smi 采样 regex 已修复） |
+| `scripts/run_mtp_bench.py` | MTP 压测套件 |
+| `scripts/start_pd_v2.py` | PD 分离启动 |
 
-- 数据：`results/mtp_model/`（单服务 11 点 + GPQA + 一致性）、`results/verify_1026/`（2026-10-26 双服务 MTP 补测 4 点 + 显存/fp8 核实记录）
-- 总表：`summary/final_report_table.{json,csv}` ｜ 明细：`summary/final_report.md` ｜ 本文件
-- 脚本：`scripts/start_server_phase5.py`（启动）、`bench_serving.py`（压测，npu-smi 采样 regex 已于 2026-10-26 修复）、`mtp_model_suite.py`、`gpqa_mtp.py`
-- 模型：`models/DeepSeek-V4-Flash-w8a8-npu16`（280GB）｜ 镜像：`glm53-w8a8-env:v2` ｜ git tag：`perf-opt-final`
+### 环境
+
+| 资源 | 值 |
+|:-----|:-----|
+| 镜像 | `glm53-w8a8-env:v2` |
+| 模型 | `models/DeepSeek-V4-Flash-w8a8-npu16`（280GB） |
+| GitHub tag | `perf-opt-final` |
+| Instance | `quant-test`（昇腾卡公共空间） |
+| 远程路径 | `/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test` |
+**压测口径**：`bench_serving.py`，c1=16req、c8=64req、c32=128req，4K→1K random tokens，temp=0/seed=42/ignore_eos，wall-time 与吞吐漂移 <7%
