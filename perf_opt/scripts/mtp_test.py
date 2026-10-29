@@ -17,13 +17,16 @@ sys.argv = [
     "--host", "0.0.0.0", "--port", "8002",
     "--max-model-len", "133120", "--max-num-batched-tokens", "8192",
     "--served-model-name", "dsv4_mtp_test", "--gpu-memory-utilization", "0.9",
-    "--max-num-seqs", "8",
+    "--max-num-seqs", "64",
     "--tensor-parallel-size", "8", "--enable-expert-parallel",
     "--quantization", "ascend", "--block-size", "128",
-    "--compilation-config", '{"cudagraph_mode":"NONE"}',
-    "--speculative-config", '{"num_speculative_tokens":1,"method":"mtp"}',
-    "--additional-config", '{"ascend_compilation_config":{"enable_npugraph_ex":true,"enable_static_kernel":false},"enable_cpu_binding":true,"enable_dsa_cp":false,"multistream_overlap_shared_expert":true}',
-    "--enforce-eager",
+    "--model-loader-extra-config", '{"enable_multithread_load":true,"num_threads":128}',
+    # graph mode: cudagraph FULL_DECODE_ONLY (same as start_server_phase5 default)
+    "--compilation-config", '{"cudagraph_mode":"FULL_DECODE_ONLY"}',
+    # MTP spec: enforce_eager INSIDE speculative-config (production pattern)
+    "--speculative-config", '{"num_speculative_tokens":1,"method":"mtp","enforce_eager":true}',
+    # additional: dsa_cp ON (production), npugraph_ex + static_kernel ON
+    "--additional-config", '{"ascend_compilation_config":{"enable_npugraph_ex":true,"enable_static_kernel":true},"enable_cpu_binding":true,"enable_dsa_cp":true,"multistream_overlap_shared_expert":true}',
     "--tokenizer-mode", "deepseek_v4",
     "--tool-call-parser", "deepseek_v4",
     "--enable-auto-tool-choice",
