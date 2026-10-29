@@ -22,7 +22,7 @@ sys.argv = [
     "--quantization", "ascend", "--block-size", "128",
     "--compilation-config", '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[8,16,24,32,40,48,56,64]}',
     "--speculative-config", '{"num_speculative_tokens":1,"method":"mtp"}',
-    "--additional-config", '{"ascend_compilation_config":{"enable_npugraph_ex":true,"enable_static_kernel":false},"enable_cpu_binding":true,"enable_dsa_cp":true,"multistream_overlap_shared_expert":true}',
+    "--additional-config", '{"ascend_compilation_config":{"enable_npugraph_ex":true,"enable_static_kernel":false},"enable_cpu_binding":true,"enable_dsa_cp":false,"multistream_overlap_shared_expert":true}',
     "--tokenizer-mode", "deepseek_v4",
     "--tool-call-parser", "deepseek_v4",
     "--enable-auto-tool-choice",
