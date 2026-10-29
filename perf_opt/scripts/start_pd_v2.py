@@ -52,12 +52,14 @@ def build_args(port, is_prefill):
         '{"ascend_compilation_config":{"enable_npugraph_ex":true,"enable_static_kernel":false},"enable_cpu_binding":true,"enable_dsa_cp":true,"multistream_overlap_shared_expert":true}',
     ]
     
-    # Both instances need tokenizer for DeepSeek-V4
-    if not is_prefill:
-        args.extend([
-            "--speculative-config",
-            '{"num_speculative_tokens": 1, "method": "mtp", "enforce_eager": true}',
-        ])
+    # MTP temporarily disabled due to cudagraph_capture_sizes assertion
+    # in Ascend platform when draft VllmConfig is created via replace().
+    # TODO: re-enable after fixing the SP assertion or draft config validation.
+    # if not is_prefill:
+    #     args.extend([
+    #         "--speculative-config",
+    #         '{"num_speculative_tokens": 1, "method": "mtp", "enforce_eager": true}',
+    #     ])
     args.extend([
         "--tokenizer-mode", "deepseek_v4",
         "--tool-call-parser", "deepseek_v4",
