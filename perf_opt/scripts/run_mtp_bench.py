@@ -10,7 +10,7 @@ from datetime import datetime
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 BENCH_SCRIPT = os.path.join(SCRIPT_DIR, "bench_serving.py")
-MODEL_DIR = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-self"
+MODEL_DIR = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-npu16"
 
 INPUT_LEN = 4096
 OUTPUT_LEN = 1024
