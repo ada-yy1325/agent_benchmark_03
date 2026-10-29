@@ -33,7 +33,8 @@ KV_TRANSFER_CONFIG = {
 }
 
 def build_args(port, is_prefill):
-    cfg = dict(KV_TRANSFER_CONFIG)
+    import copy
+    cfg = copy.deepcopy(KV_TRANSFER_CONFIG)
     cfg["kv_role"] = "kv_producer" if is_prefill else "kv_consumer"
     cfg["kv_rank"] = 0 if is_prefill else 1
     if not is_prefill:
