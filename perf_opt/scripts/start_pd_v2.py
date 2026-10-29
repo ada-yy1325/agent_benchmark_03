@@ -28,6 +28,7 @@ KV_TRANSFER_CONFIG = {
     "kv_connector_extra_config": {
         "backend": "shm",
         "lookup_rpc_port": 14579,
+        "use_layerwise": True,
     },
 }
 
