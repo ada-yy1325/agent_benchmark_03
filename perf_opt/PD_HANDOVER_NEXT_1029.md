@@ -71,3 +71,9 @@
 
 - `use_layerwise:true` 是让 producer 执行逐层保存的最直接开关，但 layerwise 模式的 NPU 拷贝开销未知，机制验证通过后建议关回非 layerwise 并另找保存触发点（事件驱动路径）。
 - 哈希链一致性未实测（历史 512-token 问题已由 full-hash 补丁覆盖，但补丁按 128 粒度、pool_worker 的 hash_block_size=8 的差异是否影响键匹配，需在任务 2 的探针里顺带确认）。
+
+## 六、下一位 Agent 提问的补充回答（2026-10-29）
+
+1. **use_layerwise 修改**：确认——`build_args` 里 `cfg = dict(KV_TRANSFER_CONFIG)` 是浅拷贝，`kv_connector_extra_config` 内层字典两侧共享，改 KV_TRANSFER_CONFIG 一处即两侧生效，无需额外字段。注意两个细节：① 内层字典被共享且 `build_args` 会对它 `["consumer_is_to_load"]=True`（这个泄漏到 producer 侧无害，别修它）；② 若将来要加**单侧**字段，必须先 `cfg["kv_connector_extra_config"] = dict(...)` 深拷内层。另：`use_layerwise:true` 会让 `requires_piecewise_for_cudagraph` 返回 True（框架自动切换 piecewise 图捕获），启动行为会变，属预期。**保存是否真的触发别靠猜**：`vllm_ascend/worker/model_runner_v1.py` 里 grep 不到 save_kv_layer 的调用（调用在 vllm 基础 model_runner 里），首次启动后在 `save_kv_layer` 入口插一行 INFO 探针确认，1 分钟的事。
+2. **任务 4 时机**：打通任务 2/3 后**立即做任务 4**（静态内核再生），原因：基线 1588.6 tok/s 是静态内核环境测的，动态内核慢 4-5 倍，不恢复静态内核做的性能对比没有意义；且任务 4 失败回滚只需恢复两个 .bak 文件。顺序：2/3 打通 → 4 静态内核 → 用静态内核重验 2/3 出最终成绩 → 5 收尾。若任务 4 反复失败（编译 ~12 分钟超时或崩），就以动态内核数据收尾并在文档里明示口径。
+3. **PROGRESS.md**：不要动老的 `perf_opt/PROGRESS.md`（阶段 0-5 历史）。新建 `perf_opt/PD_PROGRESS.md` 做 PD 专项检查点，与其它 PD 文档放在一起；每完成一个子任务追加一行（任务+结果+下一步）并随 git 提交，卡死重启后从它续跑。
