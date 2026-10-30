@@ -1,17 +1,19 @@
 # PD 分离任务交接书（2026-10-29，给下一位 Agent）
 
-## 〇、10-30 状态更新（Cline 接手失败后，原 Agent 重新接管）
+## 〇、10-30 技术裁决与方向切换（顾问 Agent 裁定，已采纳）
 
-Cline 接手后跑偏（Mooncake 源码编译、拉 vllm-ascend Docker 镜像、记错模型 Qwen3-14B），且 inspire CLI 会话过期卡死。原 Agent 重新接管后的行动清单：
+**AscendStore 路线判死**：三个断点全部实测确认——① 16384 token 粒度闸门是 MLA c128 压缩组的物理布局要求（4K 工作负载直接出局，强改会导致 KV 错位假成功）；② chunked prefill 续块保存元数据不生成（`if not new_block_ids: continue`，上游 0.23.0 缺陷，配置/代码侧修复均不可取）；③ lookup 应答疑为残留/重复 REP 进程（查清也救不了①②）。**立即停止 AscendStore 一切探针/补丁（已停，双服务已清理）。**
 
-1. **恢复 CLI 认证**（阻塞项）：live API 报 "Could not enumerate accessible workspaces"。浏览器与 CLI 不共享 Session，网页正常≠CLI 正常。修复：用户在终端跑 `inspire account add sii --username <登录名> --password <密码> --use` 重登。
-2. **核查 Cline 的环境污染**（连上后第一件事）：
-   - `python3 -c "import mooncake"` 和 `python3 -c "import vllm"`——Cline 把自编译 mooncake .so 换进了 site-packages，若 import 失败会连带崩掉 AscendStore 路径；坏了就 `pip install --force-reinstall mooncake-transfer-engine==0.3.13.post1` 恢复官方版
-   - `tmux ls`——`pull_img` 会话（docker pull 3.8GiB @100KiB/s）要 `tmux kill-session -t pull_img` 取消
-   - `df -h /`——docker 镜像占盘若影响环境则清理
-   - 两个正式补丁（full-hash/connector fix）与 config 清空状态是否还在（Cline 可能动过）
-3. **继续原计划**：任务 2（use_layerwise:true）→ 17K 两阶段验证 → 任务 3 并发 → 任务 4 静态内核 → 任务 5 收尾。
-4. Mooncake 方向**不重启**：10-27 决定性矩阵已排除（B3/P4 全崩），且其失败原因（静态内核误删）已修复不代表值得重试——当前 AscendStore 路径离打通只差 use_layerwise 一个开关。
+**新方向（官方正道）**：官方镜像 `m.daocloud.io/quay.io/ascend/vllm-ascend:DeepSeekV4-flash-0731`（内置 Ascend 编译 Mooncake AscendDirectTransport + 匹配 vllm-ascend，禁 pip 覆盖）→ **MooncakeHybridConnector**（不依赖 16384 粗粒度闸门）。
+执行要点（顾问给出）：
+- 单机探索（本实例 16 卡，P 0-7 / D 8-15；双机需第二节点，按用户规则不新建实例）：两侧 `--no-disable-hybrid-kv-cache-manager`；extra config `{"prefill":{"dp_size":1,"tp_size":8},"decode":{"dp_size":1,"tp_size":8}}`；P 用 `--enforce-eager` MTP=1；D 用 FULL_DECODE_ONLY + MTP 实际数；kv_port 避开 20000-36000
+- 容器运行方式：docker run + 全部 /dev/davinci* 设备直通 + 挂载 /inspire 模型目录（已验证本实例 docker 可用、设备可见）
+- 止损规则：同一配置最多 2 次、同一错误 2 次换路径；禁止硬改核心/编译/升级 CANN
+- 验收：D 无重复 prefill、KV 真跨进程传输、输出正确；压测 4K/1K/temp0/seed42/c1/c8/c32 对比 1588.6 基线
+- 预期管理：PD 不提升稳态吞吐，价值在 TTFT p99 长尾与 TPOT 抖动；吞吐仍用配置 B
+- 备选：平台公共镜像 `vllm-ascend:v0.30.0rc2`（内网 registry 从实例内不可达，仅可作实例重建选项）；MindIE 生产路线留后续阶段
+- 注：之前对 Mooncake 的"排除"成立条件已消失（TCP 不可用是错误框架——NPU 走 AscendDirect；历史崩溃根因是静态内核误删，已修复）
+
 
 > 前情：本项目是昇腾 910B2C ×16 上 DeepSeek-V4-Flash（W8A8）推理性能优化。阶段 0-6 已完成（成绩单见 `summary/full_optimization_summary.md`，最优基线：双服务 MTP=ON 聚合 1588.6 tok/s @c32）。本任务 = PD（prefill/decode）分离的最后一公里。
 
