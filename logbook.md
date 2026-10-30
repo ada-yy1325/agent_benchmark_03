@@ -25,6 +25,35 @@
 
 ---
 
+# 2026-10-30 — PD 攻坚第六回合：Mooncake 路线重启，双服务首次完整启动，传输链最后一段
+
+## 一、做了什么
+
+1. **推翻了"必须换官方镜像"的结论**：环境里已有全部拼图——原始 vllm 0.23.0（MooncakeConnector 已注册）+ Cline 自编译 Ascend 版 Mooncake（AscendDirect）+ 完整静态内核。从未在修复后的环境里试过 Mooncake（旧结论来自坏内核时代）。
+2. **修复链（全部实测验证，仓库里有规范补丁脚本 `perf_opt/scripts/patch_mooncake_connector.py`）**：
+   - 库加载零污染：Mooncake 引擎缺 libyaml-cpp/libmsprofiler/libascend_hal 等 → 最初给启动脚本加宽泛 LD_LIBRARY_PATH 导致 libvllm_ascend_kernels.so 崩溃（C++ 背追踪实锤 null-string 构造）。终解：**完全不动 LD_LIBRARY_PATH**，在连接器代码里按绝对路径预加载仅 4 个库（yaml-cpp + mooncake 三件套），其余靠 torch_npu 已加载符号满足。
+   - hybrid KV 适配×2：连接器 `register_kv_caches` 对每层一组 tensor 的列表形状不认（data_ptr 打在 list 上）→ 展平；Mooncake 引擎拒绝重叠内存区域（排序后相邻判重）→ **全局去重**（hybrid 各组/k-v 键共享底层分配）。
+   - 误删恢复：补丁曾误删 ~950 行（两个同名函数定位错误）→ 拉官方 v0.23.0 原版源码（jsdelivr）恢复 + 重打三补丁。
+3. **双服务首次完整启动**（FINAL-M17）：decode+prefill 双 200，零报错，权重 81/81 加载完成——Mooncake 路线历史第一次。
+4. **P/D 协议真相（读官方源码+官方文档确认）**：0.23.0 的 Mooncake P/D 是**客户端编排**——请求经 chat 协议的 `kv_transfer_params` 字段（protocol.py 原生支持，经 SamplingParams.extra_args）传参：P 带 `do_remote_decode+transfer_id`，D 带 `do_remote_prefill+remote_engine_id+remote_bootstrap_addr(http://P:8998)+transfer_id`。之前所有"本地重算"的根因之一 = 测试客户端从没传过这些参数。
+5. 引擎 ID 陷阱：日志里的 engine_id 被 vllm 打码，真实 ID 要运行时从 bootstrap `/query` 取（客户端已改为动态解析）。
+
+## 二、当前卡点（已定位到链路，探针已就位）
+
+- 编排测试：P prefill 完成（2.9s），D 的远端拉取**挂起**（600s 超时）。已排除：bootstrap 连接（已修 scheme 前缀）、engine_id（已修运行时解析）。
+- 挂点在 D 的 receive 链上且完全静默：zmq DEALER 连 P 的 worker 地址（tcp://10.245.17.1:PORT，容器内可达、host 网络）发传输请求。
+- **探针 PDX1-4 已插入连接器**（_start_load_kv / receive_kv / receive_kv_from_single_worker / send_kv_to_decode 入口 INFO 日志），重启后重测即可定位挂在哪一步。P 侧 send_kv_to_decode 的 480s 超时警告表明发送侧可能在等 D 的拉取请求。
+
+## 三、资产
+
+- `perf_opt/scripts/patch_mooncake_connector.py`（规范补丁，幂等+语法验证）
+- `perf_opt/scripts/start_pd_mooncake.py`（远端，Mooncake 连接器启动器：kv_port 38000、prefill/decode extra config dp1tp8、MC_* env 全套）
+- 编排测试客户端（远端 /tmp/pd_orch.py：运行时解析引擎 ID + http scheme）
+- 官方文档结论：P/D 三组件（P、D、代理）；env：VLLM_MOONCAKE_BOOTSTRAP_PORT 默认 8998、VLLM_MOONCAKE_ABORT_REQUEST_TIMEOUT 默认 480s
+- 当前状态：双服务已停（探针版重启中），全部修复已固化在仓库
+
+---
+
 # 2026-10-28（下午/晚）— PD 攻坚第四回合：真根因（静态内核误删）修复 + PD 双服务首次跑通 + KV 池机制完整解剖
 
 ## 一、做了什么
