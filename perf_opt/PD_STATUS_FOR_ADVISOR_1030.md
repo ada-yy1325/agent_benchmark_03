@@ -54,3 +54,21 @@ if token_len < self.cache_transfer_granularity: return 0, False
 2. **断点②**：chunked prefill 续块时 `scheduled_cached_reqs` 的 `new_block_ids` 为空导致保存元数据不生成——这是 vllm-ascend 上游 bug 还是配置问题？最小修复建议（配置侧：producer 关 chunked prefill / 调大 max-num-batched-tokens 使 17.5K 一次调度？代码侧：cached_reqs 分支按 token_len 增量生成 ReqMeta 而不依赖 new_block_ids？）
 3. **断点①**：16384 粒度闸门对 4K 基准协议是硬伤。绕过是否可行（discard_partial_chunks=false + 调 granularity）还是 MLA c128 族的池布局根本要求？若不可行，PD 路线对 <16K 工作负载是否应该直接判死？
 4. 综合判断：在当前 vllm-ascend 0.23.0 构建下（layerwise 不支持 hybrid、DP=2 编译断、Mooncake NPU 不可用），PD 是否还有可行路线？还是应升级 vllm-ascend 版本或改用 MindIE 等官方方案？给出你的推荐和理由。
+
+## 5. 顾问裁决（2026-10-30 收到，已采纳执行）
+
+**核心结论：AscendStore 对 DSV4 在 vllm-ascend 0.23.0 必败，立即停止；官方正道 = 官方镜像 + MooncakeHybridConnector。**
+- 断点③：判断为残留/重复 REP 进程应答（查清也救不了①②，不再追查）
+- 断点②：0.23.0 非 layerwise 保存链路的上游缺陷（配置侧绕过显存压力大、代码侧高风险，不做）
+- 断点①：16384 粒度是 MLA c128 物理布局要求，4K 负载在 AscendStore 路线直接判死
+- Mooncake 历史排除理由作废：NPU 走 AscendDirect 而非 TCP；历史崩溃根因（静态内核误删）已修复
+- 执行：官方镜像 `m.daocloud.io/quay.io/ascend/vllm-ascend:DeepSeekV4-flash-0731`；先单机 1P1D 探索（P 0-7 / D 8-15，MooncakeHybridConnector，--no-disable-hybrid-kv-cache-manager，extra config prefill/decode dp_size=1 tp_size=8，P eager+MTP=1，D FULL_DECODE_ONLY，kv_port 避开 20000-36000）；≤2 次失败即止；MindIE 留后续
+- 预期管理：PD 价值在 TTFT p99 长尾与 TPOT 抖动，稳态吞吐仍用配置 B
+
+## 6. 执行进度（10-30 实时）
+
+1. ✅ AscendStore 双服务已清理，探针停止追加
+2. ✅ 官方镜像拉取已启动（daocloud 前 1.7GB @1.4MB/s 后全线路被平台限速至 ~1KB/s，改 quay 直连同样被限——**实例整体出网限速，拉取挂起等恢复**）
+3. ✅ 容器可行性已验证：docker（podman）可用 + 16 davinci 设备直通可见
+4. ⏳ 等网络恢复 → 镜像就位 → 单机 1P1D 探索（P 0-7 / D 8-15）
+5. 备选：平台公共镜像 `vllm-ascend:v0.30.0rc2`（需实例重建）；旧环境可随时用镜像 pd1028 回滚
