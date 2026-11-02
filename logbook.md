@@ -1,3 +1,48 @@
+# 2026-11-02 — PD 攻坚第七回合：Mooncake KV 传输端到端打通 + 端到端压测 + PD+MTP 组合验证
+
+## 一、做了什么
+
+1. **六项修复打通 KV 传输**（补丁已归档 `perf_opt/scripts/pd_mooncake_patches/`，含应用顺序 README）：
+   - ① 引擎重编译：ADXL 设备库拒绝重叠注册（103900 E19999），放宽 transfer_engine_impl.cpp 两处重叠拒绝（构建树在数据盘 mooncake-src，增量编译成功）
+   - ② 连接器存储级注册：引擎注册改 untyped_storage 去重（不重叠→ADXL 接受），逐组寻址列表保持原样（两个约束分离）
+   - ③ 数据长度分离：传输拷贝长度=每组真实块数据（nbytes//块数），步长仅用于寻址——修复 MLA 交错视图（潜伏/稠密组共享分配）写入覆盖乱码
+   - ④ 协议 ascend：连接器默认 "rdma" 跳过 AscendDirect（TCP 读不了 NPU 内存），官方源码 shouldInstallAscendTransport 只认 ascend
+   - ⑤ ROCE/缓冲池环境：容器无 RDMA 网卡（Found 0 HCAs），按官方文档设 HCCL_INTRA_ROCE_ENABLE=1 + ASCEND_BUFFER_POOL=4:8
+   - ⑥ 客户端契约：P max_tokens=1（违反则生成块被当 prompt 块传输→乱码）+ kv_transfer_params 编排；引擎 ID 运行时从 bootstrap /query 获取（日志里的被 vllm 打码）
+2. **KV 传输铁证**：D 端日志 prompt throughput=0.0（无本地 prefill），输出文本与 producer 单独推理一致。
+3. **端到端计时**（用户要求：发 P 前起表→D 首 token 停表）：P 阶段 244.3ms + D 侧 94.9ms = **E2E TTFT 339.1ms**。此前"3.4×（94.3 vs 318.6ms）"是 D 侧局部数字——**已向用户更正**。
+4. **PD+MTP 组合验证**（用户要求：最优配置+PD 叠加）：两侧同开 MTP（P 也带草稿模型）→ 区域 65=65 对称恢复 → 实测 E2E TTFT 467.4ms、吞吐 38.0 tok/s，输出质量正确。
+5. **成绩单全面更新**（full_optimization_summary.md）：第七章端到端口径四方对比 + 第五章收益排名加 PD 负收益条目 + 第六章选择指引加 PD 不推荐行 + 头部口径更正。
+
+## 二、得到的结果（四方对比，4K/temp0/seed42/c1，全部端到端口径实测）
+
+| 配置 | E2E TTFT | 吞吐 | 卡数 |
+|:--|:--|:--|:--|
+| 单服 MTP OFF（基线） | 318.6 ms | 23.61 tok/s | 8 |
+| **单服 MTP ON（仍是最优）** | 330.2 ms | 41.2 tok/s | 8 |
+| PD 无 MTP | 339.1 ms | 23.7 tok/s | 16 |
+| PD+MTP | 467.4 ms | 38.0 tok/s | 16 |
+
+**最终结论**：4K 协议下 PD 分离（无论带不带 MTP）均无收益——prefill 太便宜（~250ms），拆分开销（P 串行等待+拉取排队）吃掉全部节省；MTP 是唯一正确优化（+3.7% TTFT 换 +74% 吞吐）。PD 理论占优场景（≥16K 长 prompt）未验证。c16 并发下 PD 进一步退化（拉取排队 p50 9.6s）。
+
+## 三、遇到的问题与解决
+
+1. ADXL 重叠注册拒绝 → 背追踪定位 → 存储级注册+寻址分离（读新版 vllm 源码确认设计）。
+2. 交错视图乱码 → 拷贝长度分离（步长≠数据长）。
+3. 传输失败 103900 → 官方文档/issue #5635 找到 HCCL_INTRA_ROCE_ENABLE=1 与 ASCEND_BUFFER_POOL 备选（容器无 RDMA）。
+4. 区域数不对称 → 探针计数定位 MTP 差异 → 两侧同开 MTP（65=65）。
+5. 乱码根因是客户端 max_tokens=64 违反官方契约 → 改 1。
+6. 补丁脚本引号/转义反复出错（三引号、\n、f-string 花括号）→ 最终统一用 chr(10)/chr(34) 拼接模式，彻底解决。
+7. 误报"3.4×"→ 用户要求端到端计时 → 339.1ms 真相 → 全文更正（含历史更正声明）。
+
+## 四、资产与提交
+
+- 补丁归档：`perf_opt/scripts/pd_mooncake_patches/`（7 个补丁 + README 应用顺序与契约）
+- 提交：7f3599c（补丁归档）、84ef3bb/733e66a/ba6a0cf/a1c5640（成绩单系列）、ce35075（logbook）
+- 远端：launcher 已提交；引擎源码补丁与构建树在数据盘 mooncake-src（持久）
+
+---
+
 # 2026-10-30 — PD 攻坚第五回合：KV 池三断点定案 + 顾问裁决转 Mooncake 官方路线
 
 ## 一、做了什么
