@@ -25,6 +25,29 @@
 
 ---
 
+# 2026-11-02 — PD 攻坚第七回合：Mooncake KV 传输端到端打通（输出正确）
+
+## 做了什么（六项修复全链，补丁已归档 perf_opt/scripts/pd_mooncake_patches/）
+
+1. **引擎重编译**：ADXL 设备库本身拒绝重叠注册（103900 E19999），重编译 transfer_engine_impl.cpp 放宽两处重叠拒绝（构建树在数据盘 mooncake-src）。
+2. **存储级注册**：连接器引擎注册改走 untyped_storage 去重（不重叠→ADXL 接受），逐组寻址列表（kv_caches_base_addr/block_len_per_layer）保持原样供传输公式——两个约束分离满足。
+3. **数据长度分离**：传输拷贝长度=每组真实块数据（nbytes//块数），步长仅用于寻址——修复交错视图（MLA 潜伏/稠密组共享分配）写入覆盖导致的乱码。
+4. **协议 ascend**：连接器默认 "rdma" 会跳过 AscendDirect（TCP 读不了 NPU 设备内存 Bad address），官方源码 shouldInstallAscendTransport 只认 ascend/ascend_direct/空。
+5. **ROCE/缓冲池环境**：容器无 RDMA 网卡（Found 0 HCAs），按官方文档设 HCCL_INTRA_ROCE_ENABLE=1 + ASCEND_BUFFER_POOL=4:8。
+6. **MTP 移除 + 客户端契约**：decode 的 MTP 使 P/D 区域数不对称（64 vs 更多）→ 移除；客户端按官方契约 P max_tokens=1 + kv_transfer_params（之前 max_tokens=64 导致生成块被当 prompt 块传输→乱码）。
+
+## 结果（铁证）
+
+- **D 端日志 prompt throughput=0.0**：KV 全部来自 P 端传输，无本地 prefill；输出文本与 producer 单独推理一致。
+- 实测（4K 输入/temp0/seed42，与基线同口径）：**c1 TTFT p50 94.3ms vs 基线 318.6ms（3.4×）**；c16 TTFT p50 9588ms（拉取排队退化）；吞吐 c1 持平 23.3 tok/s。
+
+## 教训
+
+- ADXL/引擎/协议/契约的每个坑都是读官方源码或官方文档/issue 找到的（用户要求"先搜官方"），凭直觉试的几轮全走了弯路。
+- "PD 打通"的唯一判定 = decode 端 prompt throughput≈0 + 输出质量一致，TTFT 快慢会骗人（10-28 教训）。
+
+---
+
 # 2026-10-30 — PD 攻坚第六回合：Mooncake 路线重启，双服务首次完整启动，传输链最后一段
 
 ## 一、做了什么
