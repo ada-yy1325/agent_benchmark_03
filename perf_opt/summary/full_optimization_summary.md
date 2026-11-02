@@ -153,24 +153,32 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 - **六项关键修复**（详见 `perf_opt/scripts/pd_mooncake_patches/README.md`，含应用顺序）：① 引擎重编译放宽重叠注册；② 连接器存储级注册（untyped_storage 去重，ADXL 不重叠约束 + 逐组寻址分离）；③ 传输拷贝长度=真实块数据大小（步长仅用于寻址，修复交错视图乱码）；④ ascend 协议；⑤ ROCE/缓冲池环境；⑥ decode 移除 MTP（P/D 区域对称）。
 - **客户端编排契约（官方协议，必须遵守）**：P 请求 `kv_transfer_params={do_remote_decode, transfer_id}` 且 **max_tokens=1**（违反则生成块被当 prompt 块传输→乱码）；D 请求 `kv_transfer_params={do_remote_prefill, remote_engine_id(运行时从 http://P:8998/query 获取), remote_bootstrap_addr}`。
 
-### 7.3 真实实测数据（2026-11-02，4K 输入/temp=0/seed=42，与基线同口径）
+### 7.3 真实实测数据（2026-11-02，4K 输入/temp=0/seed=42/c1=16req，与基线同口径）
 
-| 指标 | PD（实测） | 基线（MTP OFF 单服） | 对比 |
-|:-----|:-----|:-----|:-----|
-| **TTFT p50 @c1** | **94.3 ms** | 318.6 ms | ✅ **快 3.4 倍** |
-| TTFT p99 @c1 | 199.7 ms | — | 长尾健康 |
-| 输出吞吐 @c1 | 23.3 tok/s | 23.61 tok/s | 持平 |
-| TTFT p50 @c16 并发 | 9588 ms | 884.9 ms @c8 | ❌ 退化（拉取排队） |
-| 请求成功率 | 16/16 | — | ✅ |
+**端到端计时（发 P 前起表 → D 返回首 token 停表，两段加总）**：
 
-**铁证**：c1 下 D 端日志 `Avg prompt throughput: 0.0 tokens/s`——decode 未做任何本地 prefill，KV 全部来自 P 端传输；输出文本质量正确（与 P 单独推理一致）。
+| 阶段 | p50 | p99 |
+|:-----|:-----|:-----|
+| P 阶段（发 P → P 完成 prefill） | 244.3 ms | — |
+| D 侧（D 请求 → 首 token，含拉取） | 94.9 ms | 106.3 ms |
+| **真端到端 TTFT** | **339.1 ms** | 353.9 ms |
 
-### 7.4 诚实结论
+**同口径三方对比**：
 
-1. ✅ **单请求（c1）场景 PD 分离真实改善 TTFT：94.3ms vs 318.6ms（3.4×）**——这是"decode 不再重复读题"的直接收益，已实测可复现。
-2. ❌ **并发场景目前退化**：c16 的 TTFT p50 9.6s，瓶颈是拉取/发送的串行排队（P 侧同步发送循环 + D 侧解码批处理排队），当前实现未优化；且 D 无 MTP（为区域对称移除）。
-3. ➖ 吞吐持平：PD 的价值在延迟维度（TTFT/长尾）而非稳态吞吐，与官方文档预期一致。
-4. 下一步（未做）：拉取并行化、MTP 对称化方案、≥16K prompt 的 PD 相对收益对比。
+| 配置 | 端到端 TTFT c1 | 吞吐 c1 |
+|:-----|:-----|:-----|
+| PD（D 无 MTP） | 339.1 ms | 23.7 tok/s |
+| 单服 MTP OFF | 318.6 ms | 23.61 tok/s |
+| 单服 MTP ON | 330.2 ms | 41.2 tok/s |
+
+**铁证**：c1 下 D 端日志 `Avg prompt throughput: 0.0 tokens/s`——decode 未做任何本地 prefill，KV 全部来自 P 端传输；输出文本质量正确（与 P 单独推理一致）。KV 传输机制本身真实成立，但性能结论以下表为准。
+
+### 7.4 诚实结论（端到端口径）
+
+1. ❌ **4K 场景 PD 无端到端 TTFT 优势**：339.1ms vs 基线 318.6ms——P 阶段 244ms 的 prefill 串行等待抵消了 D 侧节省（此前误报的"3.4×"是 D 侧局部数字，特此更正）。
+2. ✅ **MTP 的代价/收益清晰**：+3.7% TTFT 换 +74% 吞吐（41.2 vs 23.61 tok/s）——4K 场景 MTP 完胜 PD。
+3. ⏳ **PD 理论占优场景未验证**：prefill 昂贵的长 prompt（≥16K）下 KV 传输（~95ms）才可能净赚；4K 协议下 prefill 太便宜，不值得拆。
+4. c16 并发下 PD 进一步退化（拉取排队，p50 9.6s）——当前实现未优化。
 
 ### 7.5 判定标准（防止重蹈覆辙）
 
