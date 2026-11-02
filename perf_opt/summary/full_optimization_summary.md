@@ -1,6 +1,6 @@
 # DeepSeek-V4-Flash 推理性能优化成绩单
 
-**日期**：2026-10-29（11-02 更新：PD 分离 Mooncake 路线打通，第七章含真实 PD 数据）
+**日期**：2026-10-29（11-02 更新：PD 分离 Mooncake 路线 KV 传输打通；4K 负载实测无收益，第七章含端到端口径的四方对比与最终结论）
 
 **模型**：`DeepSeek-V4-Flash-w8a8-npu16`（自量化版，280GB）
 
@@ -123,6 +123,7 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 | 🥉 | static_kernel + fp8 KV | 吞吐 +1.3~1.7%、TTFT c32 −3.3% | 零 |
 | 4 | cpu_binding + dsa_cp + multistream | 稳定基石 | 零 |
 | 5 | cudagraph (FULL_DECODE_ONLY) | 基线必需 | 零 |
+| ❌ | PD 分离（4K 负载，实测） | 负收益：E2E TTFT +6~42%、吞吐 −8~43%（vs 同卡数 MTP），机制已打通但 4K prefill 太便宜不值得拆 | 多占 8 卡 |
 ---
 
 ## 六、选择指引
@@ -132,6 +133,7 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 | 在线交互（c≤32） | 配置 A（单 TP8+MTP） | 781.8 tok/s | 330~894 ms |
 | 离线批量（吞吐至上） | **配置 B（双 TP8+MTP）** | 1588.6 tok/s | 1404~1705 ms |
 | 单 8 卡高吞吐 | 配置 A @c32 | 781.8 tok/s | 894 ms |
+| PD 分离（4K 负载） | ❌ 不推荐（实测无收益：E2E TTFT 339~467ms、吞吐 23.7~38.0 tok/s，均不如同卡数单/双服 MTP；仅 ≥16K 长 prompt 或另有验证前勿用） | — | — |
 
 ---
 
