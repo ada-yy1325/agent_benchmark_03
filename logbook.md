@@ -43,56 +43,6 @@
 
 ---
 
-# 2026-10-30 — PD 攻坚第五回合：KV 池三断点定案 + 顾问裁决转 Mooncake 官方路线
-
-## 一、做了什么
-
-1. **修复 inspire CLI 会话故障**（Cline 卡死主因）：平台更新移除了 `user.GetRoutes` 里的 `userWorkspaceList` 路由组，CLI 工作区枚举解析出空 → "no workspace names available"。raw API 探测确认 `workspace.ListWorkspaces` 正常（6 个工作区、ID 与缓存一致）→ **给本机 CLI 打回退补丁**（GetRoutes 失败时改用 ListWorkspaces，`~/.local/share/uv/tools/inspire-skill/.../browser_api/workspaces.py`）→ CLI 全面恢复。
-2. **清理 Cline 的偏航**：Mooncake 源码编译（方向已排除）、docker 拉取（已取消）、错误模型（Qwen3-14B）——均无害化处理，环境核查通过（mooncake/vllm 导入正常、正式补丁完好）。
-3. **环境全血确认**：实例换节点 478 重建后，静态内核包+配置完整恢复（原 8 包 + 10-29 新增 4 包），fill/图捕获路径健康。
-4. **layerwise 保存路径实测**：官方直接拒绝——"AscendStore layerwise mode does not yet support hybrid KV cache groups"（DSV4 的 MLA 混合组不兼容）。
-5. **KV 池三个断点全部探针定位**（详见 `perf_opt/PD_STATUS_FOR_ADVISOR_1030.md`）：
-   - ① 16384 token 粒度闸门（MLA c128 物理布局要求，<16K prompt 永不 lookup，4K 协议直接出局）
-   - ② producer 保存元数据只在第一步生成（chunked prefill 续块 `new_block_ids` 为空被跳过——0.23.0 上游缺陷）
-   - ③ consumer 查询返回 0 但 producer 应答服务零接收（疑残留 REP 进程）
-6. **顾问裁决（外部 agent 会诊）**：AscendStore 对 DSV4 在 0.23.0 必败、立即止损；官方正道 = 官方镜像 + MooncakeHybridConnector。已采纳：AscendStore 全停、双服务清理。
-7. **Mooncake 路线启动**：官方镜像 `quay.io/ascend/vllm-ascend:DeepSeekV4-flash-0731` 拉取中；容器可行性已验证（docker/podman 可用 + 16 davinci 设备直通）。
-
-## 二、遇到的问题
-
-1. CLI 会话过期（非 Cline 之过，平台接口变更所致）→ raw API 探测 + 本地 CLI 补丁解决。
-2. daocloud 源拉取 1.7GB 后**实例整体出网被限速至 ~1KB/s**（quay 直连、1ms.run、pypi、百度全线路同限）→ 拉取挂起等恢复，监控带速度恢复探测。
-
-## 三、结论与下一步
-
-- PD 现状诚实结论：AscendStore 路线在 0.23.0 对 DSV4 无解（物理粒度+上游缺陷）；等网络恢复 → 官方镜像单机 1P1D 探索（MooncakeHybridConnector，≤2 次失败即止）。
-- 资产：顾问会诊文档 `PD_STATUS_FOR_ADVISOR_1030.md`（含全部探针证据与执行进度）；交接书 `PD_HANDOVER_NEXT_1029.md` 已更新方向；git 663c67a/81ac7b1/1ef2203。
-
----
-
-# 2026-11-02 — PD 攻坚第七回合：Mooncake KV 传输端到端打通（输出正确）
-
-## 做了什么（六项修复全链，补丁已归档 perf_opt/scripts/pd_mooncake_patches/）
-
-1. **引擎重编译**：ADXL 设备库本身拒绝重叠注册（103900 E19999），重编译 transfer_engine_impl.cpp 放宽两处重叠拒绝（构建树在数据盘 mooncake-src）。
-2. **存储级注册**：连接器引擎注册改走 untyped_storage 去重（不重叠→ADXL 接受），逐组寻址列表（kv_caches_base_addr/block_len_per_layer）保持原样供传输公式——两个约束分离满足。
-3. **数据长度分离**：传输拷贝长度=每组真实块数据（nbytes//块数），步长仅用于寻址——修复交错视图（MLA 潜伏/稠密组共享分配）写入覆盖导致的乱码。
-4. **协议 ascend**：连接器默认 "rdma" 会跳过 AscendDirect（TCP 读不了 NPU 设备内存 Bad address），官方源码 shouldInstallAscendTransport 只认 ascend/ascend_direct/空。
-5. **ROCE/缓冲池环境**：容器无 RDMA 网卡（Found 0 HCAs），按官方文档设 HCCL_INTRA_ROCE_ENABLE=1 + ASCEND_BUFFER_POOL=4:8。
-6. **MTP 移除 + 客户端契约**：decode 的 MTP 使 P/D 区域数不对称（64 vs 更多）→ 移除；客户端按官方契约 P max_tokens=1 + kv_transfer_params（之前 max_tokens=64 导致生成块被当 prompt 块传输→乱码）。
-
-## 结果（铁证）
-
-- **D 端日志 prompt throughput=0.0**：KV 全部来自 P 端传输，无本地 prefill；输出文本与 producer 单独推理一致。
-- 实测（4K 输入/temp0/seed42，与基线同口径）：**c1 TTFT p50 94.3ms vs 基线 318.6ms（3.4×）**；c16 TTFT p50 9588ms（拉取排队退化）；吞吐 c1 持平 23.3 tok/s。
-
-## 教训
-
-- ADXL/引擎/协议/契约的每个坑都是读官方源码或官方文档/issue 找到的（用户要求"先搜官方"），凭直觉试的几轮全走了弯路。
-- "PD 打通"的唯一判定 = decode 端 prompt throughput≈0 + 输出质量一致，TTFT 快慢会骗人（10-28 教训）。
-
----
-
 # 2026-10-30 — PD 攻坚第六回合：Mooncake 路线重启，双服务首次完整启动，传输链最后一段
 
 ## 一、做了什么
@@ -121,6 +71,30 @@
 - 当前状态：双服务已停（探针版重启中），全部修复已固化在仓库
 
 ---
+- 资产：顾问会诊文档 `PD_STATUS_FOR_ADVISOR_1030.md`（含全部探针证据与执行进度）；交接书 `PD_HANDOVER_NEXT_1029.md` 已更新方向；git 663c67a/81ac7b1/1ef2203。
+# 2026-10-30 — PD 攻坚第五回合：KV 池三断点定案 + 顾问裁决转 Mooncake 官方路线
+
+## 一、做了什么
+
+1. **修复 inspire CLI 会话故障**（Cline 卡死主因）：平台更新移除了 `user.GetRoutes` 里的 `userWorkspaceList` 路由组，CLI 工作区枚举解析出空 → "no workspace names available"。raw API 探测确认 `workspace.ListWorkspaces` 正常（6 个工作区、ID 与缓存一致）→ **给本机 CLI 打回退补丁**（GetRoutes 失败时改用 ListWorkspaces，`~/.local/share/uv/tools/inspire-skill/.../browser_api/workspaces.py`）→ CLI 全面恢复。
+2. **清理 Cline 的偏航**：Mooncake 源码编译（方向已排除）、docker 拉取（已取消）、错误模型（Qwen3-14B）——均无害化处理，环境核查通过（mooncake/vllm 导入正常、正式补丁完好）。
+3. **环境全血确认**：实例换节点 478 重建后，静态内核包+配置完整恢复（原 8 包 + 10-29 新增 4 包），fill/图捕获路径健康。
+4. **layerwise 保存路径实测**：官方直接拒绝——"AscendStore layerwise mode does not yet support hybrid KV cache groups"（DSV4 的 MLA 混合组不兼容）。
+5. **KV 池三个断点全部探针定位**（详见 `perf_opt/PD_STATUS_FOR_ADVISOR_1030.md`）：
+   - ① 16384 token 粒度闸门（MLA c128 物理布局要求，<16K prompt 永不 lookup，4K 协议直接出局）
+   - ② producer 保存元数据只在第一步生成（chunked prefill 续块 `new_block_ids` 为空被跳过——0.23.0 上游缺陷）
+   - ③ consumer 查询返回 0 但 producer 应答服务零接收（疑残留 REP 进程）
+6. **顾问裁决（外部 agent 会诊）**：AscendStore 对 DSV4 在 0.23.0 必败、立即止损；官方正道 = 官方镜像 + MooncakeHybridConnector。已采纳：AscendStore 全停、双服务清理。
+7. **Mooncake 路线启动**：官方镜像 `quay.io/ascend/vllm-ascend:DeepSeekV4-flash-0731` 拉取中；容器可行性已验证（docker/podman 可用 + 16 davinci 设备直通）。
+
+## 二、遇到的问题
+
+1. CLI 会话过期（非 Cline 之过，平台接口变更所致）→ raw API 探测 + 本地 CLI 补丁解决。
+2. daocloud 源拉取 1.7GB 后**实例整体出网被限速至 ~1KB/s**（quay 直连、1ms.run、pypi、百度全线路同限）→ 拉取挂起等恢复，监控带速度恢复探测。
+
+## 三、结论与下一步
+
+- PD 现状诚实结论：AscendStore 路线在 0.23.0 对 DSV4 无解（物理粒度+上游缺陷）；等网络恢复 → 官方镜像单机 1P1D 探索（MooncakeHybridConnector，≤2 次失败即止）。
 
 # 2026-10-28（下午/晚）— PD 攻坚第四回合：真根因（静态内核误删）修复 + PD 双服务首次跑通 + KV 池机制完整解剖
 
