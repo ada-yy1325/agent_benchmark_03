@@ -9,10 +9,12 @@ Patches:
    `from mooncake.engine import TransferEngine` import (no LD_LIBRARY_PATH
    pollution - any CANN path in LD breaks torch_npu's load check).
 2. FLATTEN: hybrid KV gives per-layer LISTS of tensors (one per group).
-3. GLOBAL DEDUP: the Mooncake engine rejects overlapped memory regions and
-   checks only consecutive pairs after sorting by address. Hybrid KV views
-   alias shared allocations ACROSS groups and k/v dict keys, so dedupe
-   globally with the engine's exact rule.
+3. DETERMINISTIC DEDUP: the Mooncake engine rejects overlapped memory
+   regions, and the P/D asymmetric-TP validation requires EQUAL region
+   counts on both sides. Hybrid KV views alias shared allocations across
+   groups and k/v dict keys, so dedupe in DICT ORDER (identical on both
+   sides for the same model) by containment — never sort by address, which
+   is process-dependent and breaks the count symmetry.
 4. PDX1-4 probes: INFO logs on the receive/send chain (for debugging the
    current transfer hang). REMOVE after the transfer is fixed.
 """
@@ -88,16 +90,17 @@ def main():
                     (base_addr, base_addr + self.num_blocks * block_len, block_len)
                 )
 
-        # The engine accepts only non-overlapping regions and checks only
-        # consecutive pairs after sorting by address. Mirror that rule
-        # GLOBALLY: hybrid KV views alias shared allocations across groups
-        # and across the k/v cache dict keys.
-        candidates.sort()
-        last_end = None
+        # Deterministic dedup (same kept set on both P and D sides):
+        # iterate in dict order (same on both sides for the same model) and
+        # skip any candidate fully contained in an already-kept region.
+        # Hybrid KV views alias shared allocations across groups and k/v keys;
+        # the engine rejects overlapped regions, and region counts must match
+        # between producer and consumer (asymmetric TP validation).
+        seen_regions = []
         for addr, region_end, block_len in candidates:
-            if last_end is not None and addr < last_end:
+            if any(s <= addr and region_end <= e for s, e in seen_regions):
                 continue
-            last_end = region_end
+            seen_regions.append((addr, region_end))
             self.block_len_per_layer.append(block_len)
             kv_data_ptrs.append(addr)
             kv_data_lens.append(region_end - addr)
