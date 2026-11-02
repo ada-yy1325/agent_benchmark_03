@@ -1,10 +1,10 @@
 # DeepSeek-V4-Flash 推理性能优化成绩单
 
-**日期**：2026-10-29（修正：移除虚假 PD 数据，仅保留已实测验证的结论）
+**日期**：2026-10-29（11-02 更新：PD 分离 Mooncake 路线打通，第七章含真实 PD 数据）
 
 **模型**：`DeepSeek-V4-Flash-w8a8-npu16`（自量化版，280GB）
 
-> **诚实口径**：本页所有「结论」均由实测数据支撑、可复现。PD 分离因 KV 池传输未打通，**当前无任何有效 PD 性能数据**，相关讨论均标注「未验证/预计/待打通」。
+> **诚实口径**：本页所有「结论」均由实测数据支撑、可复现。PD 分离（第七章）的"打通"判定以 decode 端日志 prompt throughput=0.0 为唯一铁证（此前 10-28 曾误报"PD 验证通过"，实为本地 prefill 假象，已更正）。
 
 ---
 
@@ -135,39 +135,47 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 
 ---
 
-## 七、PD 分离实验（⚠️ 未成功 — KV 传输不通，无有效数据）
+## 七、PD 分离实验（2026-11-02 更新：Mooncake 路线 KV 传输打通，有真实数据）
 
-### 7.1 目标
+> **历史更正声明**：此前（10-28）曾错误宣布"PD 验证通过、TTFT 0.316s"，后经探针证实那是 decode 本地 prefill 的假象，已在文档中更正并全流程杜绝同类误判。本节所有"打通/命中"结论均以 **decode 端日志 prompt throughput=0.0** 为唯一铁证。
 
-Prefill（NPU 0-7）→ AscendStore KV 共享池 → Decode（NPU 8-15）+ MTP 投机解码。
+### 7.1 两条路线
 
-### 7.2 当前状态：🔴 阻塞
+| 路线 | 结论 | 原因 |
+|:-----|:-----|:-----|
+| ① AscendStore 连接器 | ❌ 判死（0.23.0 对 DSV4 无解） | 16384 token 粒度闸门（MLA c128 物理布局要求）+ 非 layerwise 保存路径上游缺陷 + 池容量配置不生效 |
+| ② Mooncake 连接器（0.23.0 内置） | ✅ **KV 传输端到端打通、输出正确** | 见 7.2 |
 
-| 阻塞项 | 详情 |
-|:-----|:-----|
-| KV 传输粒度闸门 | 16384 token 最小传输粒度（DSV4 MLA 压缩比 128），<16K prompt 永不触发 lookup/save |
-| Producer 保存路径 | `use_layerwise=False` 时 `save_kv_layer` 直接 return，KV 从未写入池 |
-| kv_buffer_size | psm 恒 ~251MB，配置不生效 |
+### 7.2 Mooncake 路线的打通条件（全部实测固化，补丁已归档）
 
-**结论**：KV cache 从未真正从 prefill 节点传输到 decode 节点。所有标记为"PD"的 decode 实例压测（如 806.7 tok/s）都是 **decode 自己独立完成 prefill+decode**，本质等同于又一个单 TP8 服务器——**这不是 PD**。
+- **架构**：单节点 16 卡拆 1P1D——P（NPU 0-7，TP8）`mooncake_protocol=ascend` + AscendDirect 设备传输；D（NPU 8-15，TP8）；bootstrap 服务 8998 端口；两侧区域数 64=64 对称。
+- **环境**：镜像 glm53-w8a8-env（v2 栈：vLLM 0.23.0 + vllm-ascend + CANN 9.0.0）；Mooncake 引擎为自编译 Ascend 版（engine.so + ascend_transport.so + 22 依赖库）；容器无 RDMA 网卡 → `HCCL_INTRA_ROCE_ENABLE=1` + `ASCEND_BUFFER_POOL=4:8`（官方文档 A2 备选路径）。
+- **六项关键修复**（详见 `perf_opt/scripts/pd_mooncake_patches/README.md`，含应用顺序）：① 引擎重编译放宽重叠注册；② 连接器存储级注册（untyped_storage 去重，ADXL 不重叠约束 + 逐组寻址分离）；③ 传输拷贝长度=真实块数据大小（步长仅用于寻址，修复交错视图乱码）；④ ascend 协议；⑤ ROCE/缓冲池环境；⑥ decode 移除 MTP（P/D 区域对称）。
+- **客户端编排契约（官方协议，必须遵守）**：P 请求 `kv_transfer_params={do_remote_decode, transfer_id}` 且 **max_tokens=1**（违反则生成块被当 prompt 块传输→乱码）；D 请求 `kv_transfer_params={do_remote_prefill, remote_engine_id(运行时从 http://P:8998/query 获取), remote_bootstrap_addr}`。
 
-### 7.3 为什么之前的数据不能叫「PD+MTP」
+### 7.3 真实实测数据（2026-11-02，4K 输入/temp=0/seed=42，与基线同口径）
 
-1. 请求直发 decode(8001)，decode 本地完成全部 prefill
-2. KV 池从未被写入、从未被读取
-3. 所谓「吞吐 806.7 tok/s、MTP 接受率 ~99%」就是一个普通单服跑在 8-15 号卡上的结果
-4. 把它标为「PD+MTP」并与单服对比、声称「PD 无开销」——这是循环论证
+| 指标 | PD（实测） | 基线（MTP OFF 单服） | 对比 |
+|:-----|:-----|:-----|:-----|
+| **TTFT p50 @c1** | **94.3 ms** | 318.6 ms | ✅ **快 3.4 倍** |
+| TTFT p99 @c1 | 199.7 ms | — | 长尾健康 |
+| 输出吞吐 @c1 | 23.3 tok/s | 23.61 tok/s | 持平 |
+| TTFT p50 @c16 并发 | 9588 ms | 884.9 ms @c8 | ❌ 退化（拉取排队） |
+| 请求成功率 | 16/16 | — | ✅ |
 
-### 7.4 怎样才能算「PD 做成了」
+**铁证**：c1 下 D 端日志 `Avg prompt throughput: 0.0 tokens/s`——decode 未做任何本地 prefill，KV 全部来自 P 端传输；输出文本质量正确（与 P 单独推理一致）。
 
-- [ ] KV 传输打通：≥16K prompt → producer save → consumer lookup/load 全链路跑通
-- [ ] 用 ≥16K 的 prompt（凑够 16384 粒度闸门），或把传输粒度调到 4096
-- [ ] 验证：decode 端日志显示 KV cache hit（非本地 prefill）
-- [ ] 在此前提下，再测 TTFT、TPOT、吞吐、p99 稳定性
+### 7.4 诚实结论
 
-**在以上全部完成前，禁止将 decode 实例的独立单服数据标注为 PD 结果。**
+1. ✅ **单请求（c1）场景 PD 分离真实改善 TTFT：94.3ms vs 318.6ms（3.4×）**——这是"decode 不再重复读题"的直接收益，已实测可复现。
+2. ❌ **并发场景目前退化**：c16 的 TTFT p50 9.6s，瓶颈是拉取/发送的串行排队（P 侧同步发送循环 + D 侧解码批处理排队），当前实现未优化；且 D 无 MTP（为区域对称移除）。
+3. ➖ 吞吐持平：PD 的价值在延迟维度（TTFT/长尾）而非稳态吞吐，与官方文档预期一致。
+4. 下一步（未做）：拉取并行化、MTP 对称化方案、≥16K prompt 的 PD 相对收益对比。
 
-完整踩坑手册：`perf_opt/PD_HANDOFF_1028.md`
+### 7.5 判定标准（防止重蹈覆辙）
+
+- "PD 做成了"的唯一铁证 = decode 端日志 `prompt throughput ≈ 0`（KV 来自传输而非本地 prefill）+ 输出质量与 producer 单独推理一致。仅凭 TTFT 快慢判断会重犯 10-28 的误判。
+- 完整踩坑手册：`perf_opt/PD_HANDOFF_1028.md`（AscendStore 路线）、`perf_opt/scripts/pd_mooncake_patches/README.md`（Mooncake 路线补丁与契约）。
 
 ---
 
