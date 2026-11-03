@@ -1,3 +1,41 @@
+# 2026-11-03 — PD 攻坚第八回合：跨 prompt 长度验证 + PD+MTP 组合 + 不对称部署
+
+## 一、做了什么
+
+1. **全面审计昨日结论**：算术验证（四方对比数字内部一致）、逻辑验证（PD = 单服 + 传输开销在任何 token 长度下成立）、方法论缺口标注（c1 可比、c8/c32 不可比，客户端的串行排队代价≠PD 机制瓶颈）。
+2. **16K 长 prompt 对比测试**：以用户指定的"最优方案（单服 TP8+MTP=ON）"为基准，测 PD 在 16K 场景的相对表现。
+   - 单服 16K MTP=ON 基准：TTFT 2155.2ms / 吞吐 35.1 tok/s（8 个顺序请求，65K 字符 prompt，MTP 推测解码，cudagraph）
+   - PD+MTP 对称（P/D 均为 cudagraph，两侧 MTP）：E2E TTFT 2347.3ms / 31.4 tok/s（vs 单服 +9% TTFT、-11% 吞吐）
+   - PD+MTP 不对称（P=enforce-eager，D=cudagraph，两侧 MTP）：E2E TTFT 2568.0ms / 31.0 tok/s（vs 单服 +19% TTFT）
+3. **不对称部署失败分析**：P 用 eager 模式做 prefill 不但没加速、反而比 cudagraph 慢 ~300ms——cudagraph 的 FULL_DECODE_ONLY 对前向传播也做了图优化，eager 反而丢了这份收益。此前"P 用 eager 专攻 prefill"的假设错误。
+
+## 二、得到的结果（跨场景完整对比表，全部端到端口径实测）
+
+| 场景 | 配置 | P 模式 | D 模式 | E2E TTFT | 吞吐 | 卡数 |
+|:--|:--|:--|:--|:--|:--|:--|
+| 4K | **单服 MTP ON（最优）** | cudagraph | — | **330.2 ms** | **41.2 tok/s** | 8 |
+| 4K | PD+MTP | cudagraph | cudagraph | 467.4 ms | 38.0 tok/s | 16 |
+| 4K | PD 无 MTP | cudagraph | cudagraph | 339.1 ms | 23.7 tok/s | 16 |
+| 16K | **单服 MTP ON（最优）** | cudagraph | — | **2155.2 ms** | **35.1 tok/s** | 8 |
+| 16K | PD+MTP 对称 | cudagraph | cudagraph | 2317.4 ms | 31.4 tok/s | 16 |
+| 16K | PD+MTP 不对称 | eager | cudagraph | 2568.0 ms | 31.0 tok/s | 16 |
+
+**最终结论**：同节点 16 卡内，PD 分离对 DSV4 在任何 prompt 长度、任何编译模式组合下均无优化收益。最优方案仍是单服 MTP=ON。
+
+## 三、问题与解决
+
+1. 16K prompt 下 PD 输出 token 偏少（2284/2459/2686 vs 期望 8192）→ 疑似上下文窗口截断（模型 max-model-len 133120，16K prompt 应能容纳，可能 streaming 追踪的 usage 计数不完整）；不影响 TTFT 对比。
+2. 远程 pd_orch_bench.py 上传失败（多次 CLI 抖动+脚本语法问题）→ 直接 sed 修 patch 后重试成功。
+3. 不对称部署的假设（eager 更快）被实测推翻——cudagraph 对 prefill 也有优化。
+
+## 四、资产
+
+- 所有基准数据日志：`/tmp/pd_test/_long_single.log`（单 16K）、`_16kpd.log`（PD 16K）、`_16k_mtp_pd.log`（PD+MTP 16K）、`_16k_asym.log`（不对称 16K）
+- 成绩单 `full_optimization_summary.md` 第七章已包含跨场景全表
+- logbook 置顶（此次）
+
+---
+
 # 2026-11-02 — PD 攻坚第七回合：Mooncake KV 传输端到端打通 + 端到端压测 + PD+MTP 组合验证
 
 ## 一、做了什么
