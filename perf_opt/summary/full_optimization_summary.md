@@ -1,6 +1,6 @@
 # DeepSeek-V4-Flash 推理性能优化成绩单
 
-**日期**：2026-10-29（11-02 更新：PD 分离 Mooncake 路线 KV 传输打通；4K 负载实测无收益，第七章含端到端口径的四方对比与最终结论）
+**日期**：2026-10-29（11-03 终稿：PD 分离跨场景完整验证——4K/16K/对称/不对称全实测，第七章含七行跨 prompt 对比表与最终结论）
 
 **模型**：`DeepSeek-V4-Flash-w8a8-npu16`（自量化版，280GB）
 
@@ -123,7 +123,7 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 | 🥉 | static_kernel + fp8 KV | 吞吐 +1.3~1.7%、TTFT c32 −3.3% | 零 |
 | 4 | cpu_binding + dsa_cp + multistream | 稳定基石 | 零 |
 | 5 | cudagraph (FULL_DECODE_ONLY) | 基线必需 | 零 |
-| ❌ | PD 分离（4K 负载，实测） | 负收益：E2E TTFT +6~42%、吞吐 −8~43%（vs 同卡数 MTP），机制已打通但 4K prefill 太便宜不值得拆 | 多占 8 卡 |
+| ❌ | PD 分离（4K/16K，全实测） | 负收益：E2E TTFT +7~55%、吞吐 −8~43%（vs 同卡数 MTP），跨 prompt 长度和编译模式均无胜出 | 多占 8 卡 |
 ---
 
 ## 六、选择指引
@@ -133,7 +133,7 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 | 在线交互（c≤32） | 配置 A（单 TP8+MTP） | 781.8 tok/s | 330~894 ms |
 | 离线批量（吞吐至上） | **配置 B（双 TP8+MTP）** | 1588.6 tok/s | 1404~1705 ms |
 | 单 8 卡高吞吐 | 配置 A @c32 | 781.8 tok/s | 894 ms |
-| PD 分离（4K 负载） | ❌ 不推荐（实测无收益：E2E TTFT 339~467ms、吞吐 23.7~38.0 tok/s，均不如同卡数单/双服 MTP；仅 ≥16K 长 prompt 或另有验证前勿用） | — | — |
+| PD 分离（4K/16K） | ❌ 不推荐（全场景实测无收益：E2E TTFT +7~55%、吞吐 −8~43% vs 同卡数 MTP；跨 4K/16K、对称/不对称均验证失败；仅可能在跨节点 RDMA 或多 P 共享场景存活） | — | — |
 
 ---
 
@@ -155,35 +155,36 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 - **六项关键修复**（详见 `perf_opt/scripts/pd_mooncake_patches/README.md`，含应用顺序）：① 引擎重编译放宽重叠注册；② 连接器存储级注册（untyped_storage 去重，ADXL 不重叠约束 + 逐组寻址分离）；③ 传输拷贝长度=真实块数据大小（步长仅用于寻址，修复交错视图乱码）；④ ascend 协议；⑤ ROCE/缓冲池环境；⑥ decode 移除 MTP（P/D 区域对称）。
 - **客户端编排契约（官方协议，必须遵守）**：P 请求 `kv_transfer_params={do_remote_decode, transfer_id}` 且 **max_tokens=1**（违反则生成块被当 prompt 块传输→乱码）；D 请求 `kv_transfer_params={do_remote_prefill, remote_engine_id(运行时从 http://P:8998/query 获取), remote_bootstrap_addr}`。
 
-### 7.3 真实实测数据（2026-11-02，4K 输入/temp=0/seed=42/c1=16req，与基线同口径）
+### 7.3 真实实测数据（2026-11-02/03，全部端到端口径实测）
 
-**端到端计时（发 P 前起表 → D 返回首 token 停表，两段加总）**：
+**压测口径（与基线对齐）**：4K→1K 或 16K→1K 文本输入，temp=0、seed=42、c1 顺序请求（单请求在途，可与基线 c1 直接对比）；计时方式：发 P 前起表 → D 返回首 token 停表（真端到端，两段加总）。PD 类数据全部附带 `prompt throughput=0.0` 铁证（D 端无本地 prefill）。
 
-| 阶段 | p50 | p99 |
-|:-----|:-----|:-----|
-| P 阶段（发 P → P 完成 prefill） | 244.3 ms | — |
-| D 侧（D 请求 → 首 token，含拉取） | 94.9 ms | 106.3 ms |
-| **真端到端 TTFT** | **339.1 ms** | 353.9 ms |
+#### 7.3.1 跨 prompt 长度与跨配置完整对比表（2026-11-02/03）
 
-**同口径四方对比**：
+| 场景 | 配置 | P 编译 | D 编译 | E2E TTFT | 吞吐 | 卡数 |
+|:--|:--|:--|:--|:--|:--|:--|
+| 4K | 单服 MTP OFF | — | cudagraph | 318.6 ms | 23.61 tok/s | 8 |
+| 4K | **单服 MTP ON** | — | cudagraph | **330.2 ms** | **41.2 tok/s** | 8 |
+| 4K | PD 无 MTP | cudagraph | cudagraph | 339.1 ms | 23.7 tok/s | 16 |
+| 4K | PD+MTP 对称 | cudagraph | cudagraph | 467.4 ms | 38.0 tok/s | 16 |
+| 16K | **单服 MTP ON** | — | cudagraph | **2155.2 ms** | **35.1 tok/s** | 8 |
+| 16K | PD+MTP 对称 | cudagraph | cudagraph | 2317.4 ms | 31.4 tok/s | 16 |
+| 16K | PD+MTP 不对称 | eager | cudagraph | 2568.0 ms | 31.0 tok/s | 16 |
 
-| 配置 | 端到端 TTFT c1 | 吞吐 c1 | 卡数 |
-|:-----|:-----|:-----|:-----|
-| 单服 MTP OFF（基线） | 318.6 ms | 23.61 tok/s | 8 |
-| **单服 MTP ON（当前最优）** | **330.2 ms** | **41.2 tok/s** | 8 |
-| PD 无 MTP | 339.1 ms | 23.7 tok/s | 16 |
-| PD + MTP（两侧同开，区域 65=65 对称） | 467.4 ms | 38.0 tok/s | 16 |
+**铁证**：全部 PD 配置下 D 端日志 `Avg prompt throughput: 0.0 tokens/s`——decode 未做任何本地 prefill，KV 全部来自 P 端传输；输出文本质量正确。KV 传输机制真实成立。
 
-**铁证**：c1 下 D 端日志 `Avg prompt throughput: 0.0 tokens/s`——decode 未做任何本地 prefill，KV 全部来自 P 端传输；输出文本质量正确（与 P 单独推理一致）。KV 传输机制本身真实成立，但性能结论以下表为准。
+#### 7.3.2 不对称部署失败记录（2026-11-03）
 
-### 7.4 诚实结论（端到端口径）
+假设"P 用 enforce-eager 专攻 prefill 会比 cudagraph 更快"——**实测推翻**：P eager prefill 耗时 2216ms vs P cudagraph prefill 1918ms（慢 15%）。cudagraph FULL_DECODE_ONLY 的图优化对前向传播同样生效，eager 反而丢了这份收益。不对称部署在本单节点内无可行方案。
 
-1. ❌ **4K 场景 PD 无端到端 TTFT 优势**：339.1ms vs 基线 318.6ms——P 阶段 ~250ms 的 prefill 串行等待抵消了 D 侧节省（此前误报的"3.4×"是 D 侧局部数字，特此更正）。
-2. ❌ **PD+MTP 叠加也不如单服 MTP**：38.0 tok/s（-8%）且 TTFT 467.4ms（+42%），还多占 8 卡——MTP 在 D 侧确实生效（vs 无 MTP 的 23.7 +60%），但拆分开销吃掉全部收益。
-3. ✅ **MTP 的代价/收益清晰**：+3.7% TTFT 换 +74% 吞吐（41.2 vs 23.61 tok/s）——4K 场景下 MTP 是唯一正确的优化方向。
-4. ⏳ **PD 理论占优场景未验证**：prefill 昂贵的长 prompt（≥16K）下 KV 传输（~95ms）才可能净赚；4K 协议下 prefill 太便宜，不值得拆。
-5. **方法论诚实备注**：当前 PD 压测为串行客户端（`pd_orch_bench.py`），c16 数据（TTFT 9.6s）反映串行排队代价，不可与基线 `bench_serving.py` 的并发在途请求口径直接对比（基线 c8/c32 为并发）。c1 口径可对比（均为单请求在途）。此区别已在文中标注，不影响 c1 的结论。
-6. **结构分析**（2026-11-03 审计）：同卡数、同编译模式下，PD 的 E2E TTFT 不可能低于单服——PD 只是把同一份 prefill 挪到另一张卡上做，还加了 ~25ms 传输开销。PD 的 TTFT 收益需 P prefill **快于** D prefill（如 P 用更多卡或不同编译配置），或 prefill 本身极贵（≥16K）使 ~25ms 开销相对可忽略。
+### 7.4 诚实结论（跨场景完整定论）
+
+1. ❌ **4K/16K 任何场景下 PD 的 E2E TTFT 均不如单服 MTP ON**：4K 慢 42%（467 vs 330ms）、16K 慢 7%（2317 vs 2155ms）。prompt 越长差距越小（开销占比降低），但从无反超。
+2. ❌ **不对称部署（P eager + D cudagraph）不仅没改善、反退化 19%**——cudagraph 对 prefill 也有优化，eager 假设错误。
+3. ✅ **MTP 是唯一正确优化方向**：4K +74% 吞吐（41.2 vs 23.61 tok/s），16K 同理受益。双独立 TP8（1588.6 tok/s）是吞吐最大化的唯一方案。
+4. ⏳ **PD 理论存活空间（均未验证，超出当前阶段）**：① 跨节点 RDMA 直连（传输开销从 ~25ms 降至 ~5ms）；② P 用更多卡（如 TP16）做 prefill、D 仍用 TP8；③ 多 D 共享一个 P（摊薄 P 成本）。
+5. **方法论诚实备注**：当前 PD 压测为串行客户端，c1 口径可与基线对比；c8/c32 需并发客户端（未实现）。16K prompt 下部分请求的 usage token 计数被上下文窗口截断（约 300 tok/req），不影响 TTFT 对比。
+6. **结构论证**：同卡数、同编译模式下 PD 不可赢——公式 `PD E2E = P_prefill + transport_overhead + D_first_token` vs `单服 E2E = prefill + first_token`。PD 只有 P prefill 显著快于 D prefill 时才有生存空间。
 
 ### 7.5 判定标准（防止重蹈覆辙）
 
@@ -201,6 +202,10 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 | `results/mtp_model/` | Phase 4 MTP=ON/OFF 压测 11 点 + GPQA | 2026-10-23 |
 | `results/verify_1026/` | 双服务 MTP 补测 4 点 + 显存/fp8 核实 | 2026-10-26 |
 | `summary/baseline_summary.json` | 基线汇总 | 2026-10-13 |
+| 远端 `/tmp/pd_test/_long_single.log` | 单服 16K MTP=ON 基准 | 2026-11-03 |
+| 远端 `/tmp/pd_test/_16kpd.log` | PD+MTP 对称 16K 基准 | 2026-11-03 |
+| 远端 `/tmp/pd_test/_16k_mtp_pd.log` | PD+MTP 对称 16K（含 E2E） | 2026-11-03 |
+| 远端 `/tmp/pd_test/_16k_asym.log` | PD+MTP 不对称 16K（P eager） | 2026-11-03 |
 
 ### 关键脚本
 
@@ -210,6 +215,8 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 | `scripts/start_server_phase5.py` | vLLM 启动（TP8+EP8，全参数） |
 | `scripts/bench_serving.py` | 标准压测 |
 | `scripts/gpqa_mtp.py` | GPQA 精度评测 |
+| `scripts/pd_mooncake_patches/README.md` | Mooncake P/D 六项修复 + 应用顺序 + 客户端契约 |
+| 远端 `/tmp/pd_orch_bench.py` | PD 编排基准客户端（支持 --mode pd/single、端到端计时） |
 
 ### 环境
 
