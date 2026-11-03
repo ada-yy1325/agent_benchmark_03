@@ -74,22 +74,24 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 | c=8 | 419.1 ms | 2227.3 ms | 27.0 ms | 282.8 | ~98% |
 | c=32 | 894.2 ms | 7999.7 ms | 37.5 ms | 781.8 | ~96% |
 
-> 数据来源：2026-10-23 会话，节点 infra-gpu-npu-033；MTP 全局接受率 **95.79%**（104152/108734 draft tokens）
+> 数据来源：2026-10-23 会话，节点 infra-gpu-npu-033；MTP 全局接受率 **95.79%**（104152/108734 draft tokens）；分点接受率 ~98%/~98%/~96% 为近似值
 ---
 
 ## 三、16 卡方案：双独立 TP8（唯一实测）
 
-### 3.1 聚合吞吐（c=32，MTP=ON）
+### 3.1 聚合吞吐（c=32，MTP=ON；无双服务 MTP=OFF 实测）
 
-| 服务 | 吞吐（MTP OFF） | 吞吐（MTP ON） | TTFT p50 | TTFT p99 |
-|:-----|:-----|:-----|:-----|:-----|
-| 服务 A (port 8000) | 277.8 tok/s | 792.5 tok/s | 1704.9 ms | 8062.6 ms |
-| 服务 B (port 8001) | 282.3 tok/s | 796.2 tok/s | 1404.2 ms | 8018.4 ms |
-| **聚合** | 560.1 tok/s | **1588.6 tok/s** | — | — |
+| 服务 | 吞吐 c=8（MTP=ON） | 吞吐 c=32（MTP=ON） | TTFT p50 |
+|:-----|:-----|:-----|:-----|
+| 服务 A (port 8000) | 277.8 tok/s | 792.5 tok/s | 1704.9 ms |
+| 服务 B (port 8001) | 282.3 tok/s | 796.2 tok/s | 1404.2 ms |
+| **聚合** | — | **1588.6 tok/s** | — |
 
-- 双服务 MTP=ON vs MTP=OFF：**+48.4%**
+- 双服务 MTP=ON vs 单服 MTP=OFF 投影：**+47.6%**（1588.6 vs 2×538.1=1076.2——线性投影，无双服务 MTP=OFF 实测数据）
 - 双服务 vs 单服务：**2.03× 线性扩展**（781.8 → 1588.6），两侧吞吐失衡 0.46%
-- 数据来源：2026-10-26，节点 infra-gpu-npu-420，w8a8-npu16 模型
+- 压测口径：每侧 64 请求，c=32 并发；c=8 行单独标注（同侧另外的 c=8 压测点，仅供验证单体性能）
+- 注：c=8 吞吐 ≈ 277.8/282.3 tok/s 为同服务低并发实测值，不由 c=32 数据推导；c=1 下此值会更高
+- 数据来源：2026-10-26，节点 infra-gpu-npu-420，w8a8-npu16 模型；所有 verify_1026 原始数据均为 MTP=ON
 
 ### 3.2 16 卡 vs 8 卡对比
 
@@ -105,7 +107,7 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 | 指标 | 成绩 | 核验方式 |
 |:-----|:-----|:-----|
 | MTP 投机接受率 | **95.79%**（104152/108734 draft tokens） | 服务器日志统计 |
-| GPQA-Diamond | **141/198 = 71.21%**（vs 官方 72.22%，−1.4%） | `gpqa_mtp.py` 实测 |
+| GPQA-Diamond | **141/198 = 71.21%**（vs ModelScope 官方 71.2%，基本一致；此前误标为 vs "官方 72.22%"，实为自量化旧版 w8a8-self 的独立测试成绩） | `gpqa_mtp.py` 实测 |
 | 冒烟评测 | 3/3 = 100% | 文本质量检查 |
 | 数值一致性 | ✅ temp=0+seed=42 下确定性输出 | 3 次重复验证 |
 | 显存占用 | **~59.8 GB/65.5 GB**（91%） | `npu-smi` raw: `HBM-Usage(MB): 59796 / 65536` |
@@ -123,7 +125,7 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 | 🥉 | static_kernel + fp8 KV | 吞吐 +1.3~1.7%、TTFT c32 −3.3% | 零 |
 | 4 | cpu_binding + dsa_cp + multistream | 稳定基石 | 零 |
 | 5 | cudagraph (FULL_DECODE_ONLY) | 基线必需 | 零 |
-| ❌ | PD 分离（4K/16K，全实测） | 负收益：E2E TTFT +7~55%、吞吐 −8~43%（vs 同卡数 MTP），跨 prompt 长度和编译模式均无胜出 | 多占 8 卡 |
+| ❌ | PD 分离（4K/16K，全实测） | 负收益（均与最优配置单服 MTP=ON 对比）：PD+MTP 4K TTFT +42%；PD+MTP 16K TTFT +7.5%；PD 无 MTP 4K 吞吐相当于 MTP OFF（23.7 vs 23.61），但与 MTP ON（41.2）相比 −42%。交叉场景详见表 7.3.1 | 多占 8 卡 |
 ---
 
 ## 六、选择指引
@@ -172,6 +174,8 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 | 16K | PD+MTP 不对称 | eager | cudagraph | 2568.0 ms | 31.0 tok/s | 16 |
 
 **铁证**：全部 PD 配置下 D 端日志 `Avg prompt throughput: 0.0 tokens/s`——decode 未做任何本地 prefill，KV 全部来自 P 端传输；输出文本质量正确。KV 传输机制真实成立。
+
+> **"PD+MTP 对称"配置说明**：表 7.3.1 中 4K 和 16K 的"PD+MTP 对称"指 **P 和 D 均开启 MTP**（65=65 区域对称，详见 7.2），不是只有 D 侧 MTP。与"PD 无 MTP"（两侧均不启用 MTP，64=64）对比可知：MTP 在 D 侧确实提升了吞吐（38.0 vs 23.7 tok/s，+60%），但两侧同开 MTP 额外增加约 128ms 的 draft KV 同步与编排开销（467 vs 339ms）。"PD+MTP 对称"耗时高于"PD 无 MTP"属原型实现的合理表现，非数据异常。
 
 #### 7.3.2 不对称部署失败记录（2026-11-03）
 
