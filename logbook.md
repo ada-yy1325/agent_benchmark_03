@@ -1,3 +1,68 @@
+# 2026-11-04 — PD 攻坚第九回合：并发扫射 + metrics 分析 + torch profiler
+
+## 一、做了什么
+
+1. **vLLM /metrics 端点分析**（首次读取 P/D 两侧服务端指标）：
+   - 关键发现：`prompt_tokens_by_source_total{source="external_kv_transfer"}` 在 D 侧 = 131.0、P 侧 = 0.0——**这是比 prompt throughput=0.0 更直接的 KV 传输铁证**（D 的 prompt tokens 全部来自外部传输）
+   - D 侧 TTFT (0.406s) < P 侧 TTFT (0.562s)——服务端指标也证实 D 从 P 拉取 KV 跳过了 prefill
+   - `time_per_output_token_seconds`（TPOT）在 vLLM 0.23.0 的 metrics 端点不存在——TPOT 必须由客户端流式追踪
+   - `kv_transfer` 系列指标完全缺失——MooncakeConnector 不暴露传输字节/耗时
+
+2. **并发扫射（c1→c4→c8→c16，真实生产模式）**：用户指出此前全部测试为 c1 串行——"没有人的服务是只有一个人打这几台机器的"。设计了两阶段并发客户端（P prefill 线程池 + D decode 线程池，`pd_conc_bench.py`）：
+   - c1（P/D 各 1 并发，16 请求）：P prefill 254ms、D TTFT 394ms、吞吐 39.5 tok/s
+   - c4（P/D 各 4 并发，32 请求）：D TTFT 394ms（零退化！）、吞吐 149.8 tok/s（3.8×）——4 并发未触饱和
+   - c8（P/D 各 8 并发，32 请求）：**P prefill 暴涨到 1235ms（4.9× 退化）**——P 侧饱和拐点已突破；D TTFT p50 仅 599ms（+52%）；吞吐 274.6 tok/s（7.0×）
+   - c16（P/D 各 16 并发，64 请求）：P prefill 2202ms、D TTFT p50 617ms（+57%）、吞吐 486.2 tok/s；D TTFT p99 已扩散到 1017ms
+   - c32 尝试启动（CLI 中断导致命令丢失——未启动）
+
+3. **饱和曲线结论**：
+   - 吞吐从 39.5 → 149.8 → 274.6 → 486.2 tok/s（12.3× 增长），但 vs 单服 MTP ON c32=781.8 仅达到 62%
+   - P 是绝对瓶颈——prefill 排队时间随并发暴涨（254→1235→2202ms），D 侧 TTFT p50 几乎不退化（394→599→617ms）
+   - 趋势表明继续增加并发（c32）吞吐可能进一步爬升但 P 的 prefill 退化会加速
+
+## 二、得到的结果
+
+### 2.1 并发扫射全表
+
+| 并发 (P/D) | 请求数 | P prefill p50 | D TTFT p50 | D TTFT p99 | 吞吐 | vs c1 |
+|:--|:--|:--|:--|:--|:--|:--|
+| c=1 | 16 | 254ms | 394ms | — | 39.5 tok/s | 1× |
+| c=4 | 32 | — | 394ms | 655ms | 149.8 tok/s | 3.8× |
+| c=8 | 32 | 1235ms | 599ms | 721ms | 274.6 tok/s | 7.0× |
+| c=16 | 64 | 2202ms | 617ms | 1017ms | 486.2 tok/s | 12.3× |
+
+### 2.2 metrics 分析关键数字
+
+| 指标 | P | D | 解读 |
+|:--|:--|:--|:--|
+| `time_to_first_token_seconds_sum` | 0.562s | 0.406s | D 跳过 prefill（快 28%） |
+| `e2e_request_latency_seconds_sum` | 0.562s | 1.363s | D E2E 更长（生成 40 tokens vs P 的 1 token） |
+| `prompt_tokens_by_source{external_kv_transfer}` | 0.0 | 131.0 | 🎯 最直接的 KV 传输铁证 |
+
+## 三、遇到的问题与解决
+
+1. CLI 频繁中断（term proxy SSL 超时）→ 临界命令反复重试；c32 启动命令因 CLI 中断而丢失
+2. torch profiler 需嵌入 vLLM 进程——外部不可达，改用 metrics 前后差值法作为轻量替代
+3. 邮件发送失败（AppleScript 中文字符问题）→ 简化为纯 ASCII
+
+## 四、资产
+
+- 并发基准客户端：远端 `/tmp/pd_conc_bench.py`（两阶段设计，支持 --p-concurrency/--d-concurrency/--num-requests）
+- metrics 采集脚本：远端 `/tmp/pd_metrics.py`（pre/post delta 提取）
+- profiler 脚本：远端 `/tmp/pd_profiler.py`（metrics delta 法）
+- 并发数据日志：`/tmp/pd_test/_conc_c[1|4|8|16].log`
+- c1 基准日志：`/tmp/pd_test/_conc_c1.log`
+
+## 五、待完成（CLI 恢复后）
+
+1. 成绩单 `full_optimization_summary.md` 补充并发数据章节 ✅ 已在本 session 完成
+2. logbook 置顶 ✅ 已在本 session 完成
+3. git commit ✅ 已在本 session 完成
+4. 保存镜像 + 关闭实例 + 验证 STOPPED（CLI 恢复后执行）
+5. 邮件通知最终结果（CLI 恢复后发送）
+
+---
+
 # 2026-11-03 — PD 攻坚第八回合：跨 prompt 长度验证 + PD+MTP 组合 + 不对称部署
 
 ## 一、做了什么

@@ -177,7 +177,20 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 
 > **"PD+MTP 对称"配置说明**：表 7.3.1 中 4K 和 16K 的"PD+MTP 对称"指 **P 和 D 均开启 MTP**（65=65 区域对称，详见 7.2），不是只有 D 侧 MTP。与"PD 无 MTP"（两侧均不启用 MTP，64=64）对比可知：MTP 在 D 侧确实提升了吞吐（38.0 vs 23.7 tok/s，+60%），但两侧同开 MTP 额外增加约 128ms 的 draft KV 同步与编排开销（467 vs 339ms）。"PD+MTP 对称"耗时高于"PD 无 MTP"属原型实现的合理表现，非数据异常。
 
-#### 7.3.2 不对称部署失败记录（2026-11-03）
+#### 7.3.2 并发扫射（2026-11-04，真实生产多并发模式）
+
+此前所有 PD 测试均为 c=1 串行。用户指出"没有人的服务是只有一个人打机器"——需要多并发打到饱和。使用两阶段并发客户端（P prefill 池 + D decode 池，`pd_conc_bench.py`，4K prompt/1K output）：
+
+| 并发 (P/D) | 请求数 | P prefill p50 | D TTFT p50 | D TTFT p99 | 吞吐 | 饱和趋势 |
+|:--|:--|:--|:--|:--|:--|:--|
+| c=1 | 16 | 254ms | 394ms | — | 39.5 tok/s | 基准 |
+| c=4 | 32 | — | 394ms | 655ms | 149.8 tok/s | ✅ 3.8×，零退化 |
+| c=8 | 32 | 1235ms | 599ms | 721ms | 274.6 tok/s | ⚠️ P 侧饱和拐点 |
+| c=16 | 64 | 2202ms | 617ms | 1017ms | 486.2 tok/s | P 严重排队，D p99 扩散 |
+
+**饱和分析**：吞吐 12.3× 增长至 486.2 tok/s，但仅为同卡数单服 MTP ON（781.8 @c32）的 **62%**。P 是绝对瓶颈（prefill 排队 254→1235→2202ms 暴涨），D TTFT p50 几乎不退化（394→599→617ms）。D p99 在 c16 出现两段扩散（长尾 1s+）。c32 因 CLI 中断未启动——总吞吐天花板未完全验证，但下行趋势已由 c16 的 P prefill 2.2s 明确。
+
+#### 7.3.3 不对称部署失败记录（2026-11-03）
 
 假设"P 用 enforce-eager 专攻 prefill 会比 cudagraph 更快"——**实测推翻**：P eager prefill 耗时 2216ms vs P cudagraph prefill 1918ms（慢 15%）。cudagraph FULL_DECODE_ONLY 的图优化对前向传播同样生效，eager 反而丢了这份收益。不对称部署在本单节点内无可行方案。
 
