@@ -1,3 +1,84 @@
+# 2026-11-06 — PD 攻坚第十回合：Proxy 搭建 + Mooncake 配置修正
+
+## 一、做了什么
+
+1. **Code review 确认致命缺陷**：
+   - 此前 PD 分离根本没在工作——D 侧 `prompt_tokens_by_source{external_kv_transfer}=0.0`，`Num KV expired reqs=32`（P 产出了 KV 块但 D 从未拉取）
+   - 根源：1) 缺少 Load Balance Proxy（官方 PD 架构的必须组件），2) kv-transfer 参数偏离官方指南
+
+2. **下载官方参考文件**：
+   - `pd_proxy_official.py` — 官方 v0.23.0 proxy 参考（1214 行）
+   - `mooncake_guide_official.md` — 官方 v0.10.1 Mooncake 部署指南（150 行）
+
+3. **二次校对着色 v0.10.1 官方指南修正所有参数**：
+   | 参数 | 旧值 | 修正后 | 依据 |
+   |:--|:--|:--|:--|
+   | `kv_parallel_size` | 2 | **1** | 官方指南明确写 1 |
+   | `kv_buffer_device` | ❌ 缺失 | **"npu"** | 官方指南要求 |
+   | `kv_port` | 38000（P/D共用） | **20001/20002（P/D分开）** | 官方指南规范 |
+   | `mooncake_protocol` | 放在 kv_connector_extra_config 顶层 | **删除** | 官方指南无此字段 |
+   | `--enforce-eager`（D） | ❌ 缺失 | **✅ 加上** | 官方指南 P 和 D 都有 |
+   | `--data-parallel-address` | ❌ 缺失 | **localhost** | 官方指南要求 |
+   | `--data-parallel-rpc-port` | ❌ 缺失 | **9100** | 官方指南要求 |
+
+4. **编写最小化 PD Proxy**（`pd_proxy.py`，152 行）：
+   - FastAPI + httpx + uvicorn 实现
+   - 两阶段路由：Client → Proxy(:8002) → P(:8000) prefill → 取 kv_transfer_params → D(:8001) decode
+   - 支持 `/v1/completions` 和 `/v1/chat/completions`
+   - 流式响应透传 + 请求追踪
+
+5. **编写后台自动化测试脚本**（`pd_test_background.py`，140 行）：
+   - 等待 P/D 健康自检
+   - 直接 D vs 代理 P→D 对比测试
+   - 5 请求并发基准 + metrics 采集
+   - 全结果写入 `/tmp/pd_proxy_test_results.log`
+
+## 二、得到的结果
+
+### 2.1 日志确证的发现
+
+```
+D metrics: external_kv_transfer = 0     ← PD 从未真正传输
+D metrics: Num KV expired reqs = 32     ← P 产生 KV 块，D 没拉取，480s 超时释放
+D scheduler: assert not self.is_kv_producer ← v0.23.0 MooncakeConnector scheduler 潜在 bug
+```
+
+**结论：vLLM-Ascend v0.23.0 的 Mooncake 传输层本身正常（P 注册 KV 块成功、D 连接成功），但没有 proxy 时请求不经过两阶段路由，D 只用本地 prefill，KV 传输形同虚设。**
+
+### 2.2 远程环境问题
+
+- `inspire notebook exec` 结束后会杀死所有进程（包括 tmux session），导致 P/D 频繁 crash
+- 成功确认 tmux session 可以在两次 exec 之间存活（`test_sleep` 验证通过）
+- 但启动 vLLM 的 tmux session 在 exec 结束后可能因脚本错误退出→session 随之消亡
+
+## 三、遇到的问题
+
+1. **远程 P/D 反复 crash**：启智平台 exec 模式下启动的服务不稳定，可能是资源竞争或 exec session 终止清理导致
+2. **邮件打通失败**：macOS Mail 无配置账户、本地 sendmail 拒收外部地址、SMTP 需凭据→用户选择暂缓
+3. **fuser 命令缺失**：远程机器无 `fuser`，导致 start_pd_mooncake.py 中 `fuser -k` 失败
+4. **tmux 持久化不稳定**：虽然 test_sleep 验证可行，但含 Python 脚本的 tmux session 涉及复杂的子进程管理，在 exec 断开后可能不稳定
+
+## 四、资产（本次新增/修改的文件）
+
+| 文件 | 行数 | 用途 |
+|:--|:--|:--|
+| `perf_opt/scripts/pd_proxy.py` | 152 | 🔑 最小化 PD 代理（1P1D） |
+| `perf_opt/scripts/pd_proxy_official.py` | 1214 | 官方 v0.23.0 参考实现 |
+| `perf_opt/scripts/mooncake_guide_official.md` | 150 | 官方 Mooncake 部署指南 |
+| `perf_opt/scripts/pd_test_background.py` | 140 | 后台自动化测试 |
+| `perf_opt/scripts/start_pd_mooncake.py` | 362 | ✅ 参数全面修正 |
+| `perf_opt/scripts/pd_conc_bench.py` | 159 | 已修改（proxy 测试支持） |
+
+## 五、待完成（下次 session）
+
+1. 启动 P+D+Proxy 全栈（用 `inspire notebook shell` 交互终端或修复 tmux 持久化）
+2. 验证 Proxy 下 P→D KV 传输是否工作（`external_kv_transfer > 0` 为成功标志）
+3. 对比测试：直接 D vs Proxy P→D TTFT/吞吐
+4. 邮件通知打通
+5. 全部测试完成后保存镜像 + 关闭实例
+
+---
+
 # 2026-11-04 — PD 攻坚第九回合：并发扫射 + metrics 分析 + torch profiler
 
 ## 一、做了什么
