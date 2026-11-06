@@ -11,20 +11,33 @@ import urllib.request
 P_URL = "http://127.0.0.1:8000/v1/completions"
 D_URL = "http://127.0.0.1:8001/v1/completions"
 BOOTSTRAP = "http://127.0.0.1:8000"
+P_LOG = "/tmp/pd_test/prefill_v2.log"
+
+
 def _get_engine_id(timeout=120):
-    """Fetch P engine_id from bootstrap /query endpoint."""
+    """Extract P engine_id from prefill log.
+    vLLM 0.23 removed /query endpoint.
+    Engine ID = kv_ip:kv_port (default if not set in config).
+    """
+    import re, os
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
-            with urllib.request.urlopen(f"{BOOTSTRAP}/query", timeout=5) as r:
-                data = json.loads(r.read())
-                eid = data.get("engine_id", "")
-                if eid:
-                    return eid
-        except Exception:
-            pass
+            if not os.path.exists(P_LOG):
+                time.sleep(2)
+                continue
+            with open(P_LOG, "r", errors="replace") as f:
+                text = f.read()
+            ip_m = re.search(r"kv_ip='([^']+)'", text)
+            port_m = re.search(r"kv_port=(\d+)", text)
+            if ip_m and port_m:
+                engine_id = f"{ip_m.group(1)}:{port_m.group(1)}"
+                print(f"[bench] extracted engine_id={engine_id}")
+                return engine_id
+        except Exception as e:
+            print(f"[bench] _get_engine_id retry: {e}")
         time.sleep(2)
-    raise RuntimeError("Cannot get engine_id from P bootstrap")
+    raise RuntimeError("Cannot extract engine_id from prefill log")
 
 
 def _send_prefill(prompt, transfer_id, timeout=300):
