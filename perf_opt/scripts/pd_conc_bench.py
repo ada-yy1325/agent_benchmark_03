@@ -43,7 +43,7 @@ def _get_engine_id(timeout=120):
 def _send_prefill(prompt, transfer_id, timeout=300):
     """Send one prefill request to P (max_tokens=1)."""
     payload = {
-        "model": "default", "prompt": prompt,
+        "model": "dsv4", "prompt": prompt,
         "max_tokens": 1, "temperature": 0.0, "stream": False,
         "kv_transfer_params": json.dumps({
             "do_remote_decode": True, "transfer_id": transfer_id,
@@ -65,7 +65,7 @@ def _send_prefill(prompt, transfer_id, timeout=300):
 def _send_decode(prompt, transfer_id, engine_id, max_tokens=200, timeout=300):
     """Send one decode request to D. Returns TTFT, output tokens."""
     payload = {
-        "model": "default", "prompt": prompt,
+        "model": "dsv4", "prompt": prompt,
         "max_tokens": max_tokens, "temperature": 0.0, "stream": False,
         "kv_transfer_params": json.dumps({
             "do_remote_prefill": True,
