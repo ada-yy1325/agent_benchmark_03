@@ -13,29 +13,10 @@ MODEL = f"{PROJECT}/models/DeepSeek-V4-Flash-w8a8-npu16"
 SCRIPTS = f"{PROJECT}/perf_opt/scripts"
 TMP = "/tmp/pd_test"
 
-# ── Mooncake environment variables (unified for both sides) ────────────────
-MC_ENV = {
-    "MC_TCP_ENABLE_CONNECTION_POOL": "0",
-    "MC_METADATA_CLUSTER_ID": "0",
-    "MC_NUM_COMP_CHANNELS_PER_CTX": "2",
-    "MC_AUTO_GID_MAX_RETRIES": "3",
-    "MC_TE_METADATA_REFRESH_INTERVAL_SECONDS": "1",
-    "MC_HANDSHAKE_LISTEN_BACKLOG": "128",
-    "MC_HANDSHAKE_CONNECT_TIMEOUT": "10",
-    "MC_RDMA_RAIL_PAUSE_SECONDS": "5",
-    "MC_RDMA_WORKER_IDLE_SPIN_US": "0",
-    "MC_ENABLE_HCA_PEER_AFFINITY": "0",
-    "MC_LOG_RDMA_SLICE_AFFINITY": "0",
-    "MC_TRACK_RDMA_POSTED_SLICES": "0",
-    "MC_EFA_HOMOGENEOUS_PEERS": "0",
-    "MC_EFA_CQ_DRAIN_TIMEOUT_MS": "1000",
-    "MC_RDMA_NOTIFY_RECV_COUNT": "4",
-    "MC_RDMA_NOTIFY_BUFFER_SIZE": "4096",
-    "MC_RDMA_NOTIFY_MAX_PENDING_SENDS": "16",
-    "MC_RDMA_NOTIFY_OOB_FALLBACK": "1",
-    "MC_TRANSFER_TIMEOUT": "30",
-    "MC_CUSTOM_TOPO_JSON": "",
-}
+# ── Mooncake environment variables (keep minimal for loopback TCP) ──────────
+# Disabled all MC_* vars: worker basic_string crash investigation
+# The connector preloads engine.so/ascend_transport.so via ctypes (no LD pollution)
+MC_ENV = {}
 
 # ── Common additional-config JSON ──────────────────────────────────────────
 ADDITIONAL_CONFIG = json.dumps({
@@ -122,7 +103,8 @@ def generate_shell_script(name, devices, args_file, logfile):
     lines.append("export HCCL_INTRA_ROCE_ENABLE=1")
     lines.append("export ASCEND_BUFFER_POOL=4:8")
     mc_vars = " ".join(f"{k}={v}" for k, v in MC_ENV.items())
-    lines.append(f"export {mc_vars}")
+    if mc_vars:
+        lines.append(f"export {mc_vars}")
     lines.append(
         "export HCCL_BUFFSIZE=1024 TASK_QUEUE_ENABLE=1 "
         "HCCL_OP_EXPANSION_MODE=AIV VLLM_ASCEND_ENABLE_FLASHCOMM1=1"
