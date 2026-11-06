@@ -137,6 +137,10 @@ def main():
     pt = [r["prefill_ms"] for r in pr.values() if r["ok"]]
     pf = sum(1 for r in pr.values() if not r["ok"])
     pp50 = statistics.median(pt) if pt else -1
+    # Print first 3 failures for debugging
+    fails = [r for r in pr.values() if not r["ok"]]
+    for f in fails[:3]:
+        print(f"[stage1] FAIL id={f['transfer_id']}: {f.get('error','?')}")
     print(f"[stage1] wall={w1:.1f}s, ok={len(pt)}, fail={pf}, "
           f"prefill_p50={pp50:.0f}ms")
 
@@ -155,6 +159,10 @@ def main():
     et = [r["e2e_ms"] for r in dr.values() if r["ok"]]
     to = sum(r["out_tokens"] for r in dr.values() if r["ok"])
     df = sum(1 for r in dr.values() if not r["ok"])
+    # Print first 3 decode failures
+    dfails = [r for r in dr.values() if not r["ok"]]
+    for f in dfails[:3]:
+        print(f"[stage2] FAIL id={f['transfer_id']}: {f.get('error','?')}")
     ep50 = statistics.median(et) if et else -1
     ep99 = _pct(et, 99) if et else -1
     tp = to / w2 if w2 > 0 else 0
