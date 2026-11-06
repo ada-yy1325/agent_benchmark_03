@@ -3,8 +3,14 @@
 PD Mooncake: Prefill(0-7) + Decode(8-15) dual-instance launcher.
 Supports serve mode (_PD_ARGS_FILE set) and orchestrator mode (--serial).
 
-Reconstructed 2026-11-06 from patches & arg dumps. Zero LD pollution:
-no LD_PRELOAD, no LD_LIBRARY_PATH mooncake (connector preloads its own deps via ctypes).
+Environment: 5 conditions required for stability (see PD_HANDOVER_1106 §5):
+  (1) mooncake dir: 51 core .so files, 2 CANN dupes in bak_libs/
+  (2) LD_LIBRARY_PATH suffix: appends mooncake dir (system CANN priority first)
+  (3) ALL MC_* env vars set — each plugs a getenv()→nullptr→basic_string crash
+  (4) NO LD_PRELOAD (bt_hook2.so lives in /tmp and survives container rebuild)
+  (5) Connector preload patch in mooncake_connector.py (image-level, not git)
+
+Reconstructed 2026-11-06, MC_ENV restored 2026-11-06 from engine binary analysis.
 """
 import argparse, json, os, sys, time
 
@@ -13,10 +19,110 @@ MODEL = f"{PROJECT}/models/DeepSeek-V4-Flash-w8a8-npu16"
 SCRIPTS = f"{PROJECT}/perf_opt/scripts"
 TMP = "/tmp/pd_test"
 
-# ── Mooncake environment variables (keep minimal for loopback TCP) ──────────
-# Disabled all MC_* vars: worker basic_string crash investigation
-# The connector preloads engine.so/ascend_transport.so via ctypes (no LD pollution)
-MC_ENV = {}
+# ── Mooncake environment variables ─────────────────────────────────────────
+# ALL MC_* vars must be set: mooncake C++ engine calls std::getenv() without
+# null-check → std::string(nullptr) → basic_string::_S_construct null not valid
+# These were reconstructed from the engine binary's getenv strings (11-06).
+MC_ENV = {
+    # ── TCP / Networking (loopback-only, no RDMA/IB/EFA) ──
+    "MC_FORCE_TCP": "1",
+    "MC_TCP_ENABLE_CONNECTION_POOL": "0",
+    "MC_TCP_PROTO": "tcp",
+    "MC_TCP_BIND_ADDRESS": "127.0.0.1",
+    "MC_TCP_LANES_PER_PEER": "1",
+    "MC_TCP_MAX_CONNECTIONS_PER_PEER": "16",
+    "MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER": "16",
+    "MC_TCP_MAX_QUEUED_BYTES_PER_PEER": "134217728",
+    "MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER": "4096",
+    "MC_TCP_ADMISSION_TIMEOUT_MS": "30000",
+    "MC_TCP_PROGRESS_TIMEOUT_SEC": "30",
+    "MC_TCP_STATUS_TIMEOUT_SEC": "300",
+    "MC_TCP_SLICE_SIZE": "1048576",
+    "MC_NUM_TCP_IO_THREADS": "4",
+    "MC_SLICE_SIZE": "1048576",
+    "MC_SLICE_TIMEOUT": "30",
+    "MC_RETRY_CNT": "10",
+    "MC_FRAGMENT_RATIO": "1.0",
+    "MC_MIN_REG_SIZE": "4096",
+    # ── RDMA (disabled — no RDMA NICs) ──
+    "MC_FORCE_SHM": "0",
+    "MC_FORCE_HCA": "",
+    "MC_GID_INDEX": "3",
+    "MC_IB_PORT": "1",
+    "MC_IB_SL": "0",
+    "MC_IB_TC": "0",
+    "MC_MTU": "4096",
+    "MC_PKEY_INDEX": "0",
+    "MC_MAX_MR_SIZE": "68719476736",
+    "MC_MAX_CQE_PER_CTX": "4096",
+    "MC_MAX_EP_PER_CTX": "256",
+    "MC_MAX_INLINE": "256",
+    "MC_MAX_SGE": "4",
+    "MC_MAX_WR": "4096",
+    "MC_NUM_COMP_CHANNELS_PER_CTX": "1",
+    "MC_NUM_CQ_PER_CTX": "1",
+    "MC_NUM_QP_PER_EP": "1",
+    "MC_WORKERS_PER_CTX": "2",
+    "MC_IB_PCI_RELAXED_ORDERING": "0",
+    "MC_RDMA_BIND_ADDRESS": "",
+    "MC_RDMA_DATA_DIRECT": "0",
+    "MC_RDMA_DATA_DIRECT_PAIRING": "",
+    "MC_RDMA_NOTIFY_BUFFER_SIZE": "2097152",
+    "MC_RDMA_NOTIFY_CONNECT_TIMEOUT_MS": "30000",
+    "MC_RDMA_NOTIFY_ENABLED": "0",
+    "MC_RDMA_NOTIFY_MAX_PENDING_SENDS": "4096",
+    "MC_RDMA_NOTIFY_OOB_FALLBACK": "1",
+    "MC_RDMA_NOTIFY_RECV_COUNT": "4096",
+    "MC_RDMA_RAIL_PAUSE_SECONDS": "300",
+    "MC_RDMA_SIGNAL_INTERVAL": "8192",
+    "MC_RDMA_WORKER_IDLE_SPIN_US": "0",
+    "MC_USE_RDMA_TWOSIDED": "1",
+    "MC_TRACK_RDMA_POSTED_SLICES": "0",
+    "MC_PATH_ROUNDROBIN": "1",
+    # ── EFA / AWS (disabled) ──
+    "MC_EFA_CQ_DRAIN_TIMEOUT_MS": "10000",
+    "MC_EFA_CQ_THREADS": "4",
+    "MC_EFA_HOMOGENEOUS_PEERS": "0",
+    "MC_EFA_NIC_SELECTION": "",
+    "MC_EFA_STALL_MIN_MS": "100",
+    # ── Transfer Engine ──
+    "MC_METADATA_CLUSTER_ID": "",
+    "MC_ENDPOINT_STORE_TYPE": "",
+    "MC_ENABLE_DEST_DEVICE_AFFINITY": "0",
+    "MC_ENABLE_HCA_PEER_AFFINITY": "0",
+    "MC_ENABLE_PARALLEL_REG_MR": "1",
+    "MC_NIC_PEER_AFFINITY": "",
+    "MC_AUTO_GID_MAX_RETRIES": "3",
+    "MC_CONN_PAUSE_TTL_MS": "0",
+    "MC_CONTEXT_PAUSE_TTL_MS": "0",
+    "MC_MAX_CONCURRENT_REG_MR": "16",
+    "MC_DISABLE_METACACHE": "0",
+    "MC_MAX_PRC_PORT": "0",
+    "MC_MAX_RPC_PORT": "0",
+    "MC_MIN_PRC_PORT": "0",
+    "MC_MIN_RPC_PORT": "0",
+    "MC_LEGACY_RPC_PORT_BINDING": "0",
+    "MC_HANDSHAKE_CONNECT_TIMEOUT": "300",
+    "MC_HANDSHAKE_LISTEN_BACKLOG": "128",
+    "MC_HANDSHAKE_MAX_LENGTH": "131072",
+    "MC_HANDSHAKE_MAX_NOTIFY_ENTRIES": "32",
+    "MC_HANDSHAKE_PORT": "50051",
+    "MC_CUSTOM_TOPO_JSON": "",
+    "MC_RPC_PROTOCOL": "tcp",
+    "MC_TRANSFER_TIMEOUT": "300",
+    # ── HIP/KFD (AMD — disabled on Ascend) ──
+    "MC_HIP_KFD_PIN_FIX": "0",
+    # ── Logging / Diagnostic ──
+    "MC_LOG_LEVEL": "WARNING",
+    "MC_LOG_DIR": "",
+    "MC_LOG_RDMA_SLICE_AFFINITY": "0",
+    "MC_USE_TENT": "0",
+    "MC_YLT_LOG_LEVEL": "WARNING",
+    "MC_TE_METADATA_REFRESH_INTERVAL_SECONDS": "60",
+    "MC_TE_METRIC": "0",
+    "MC_TE_METRIC_INTERVAL_SECONDS": "60",
+    "MC_TE_FILTERS": "",
+}
 
 # ── Common additional-config JSON ──────────────────────────────────────────
 ADDITIONAL_CONFIG = json.dumps({
@@ -100,9 +206,12 @@ def generate_shell_script(name, devices, args_file, logfile):
         "PYTORCH_NPU_ALLOC_CONF=expandable_segments:True",
     ]
     lines.append("export " + " ".join(common_env))
-    # DISABLED for basic_string diagnosis
-    # lines.append("export HCCL_INTRA_ROCE_ENABLE=1")
-    # lines.append("export ASCEND_BUFFER_POOL=4:8")
+    # ── Mooncake engine LD_LIBRARY_PATH (system CANN first, mooncake suffix) ──
+    MC_LIB_DIR = "/opt/mamba/lib/python3.13/site-packages/mooncake"
+    lines.append(f"export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:{MC_LIB_DIR}")
+    # ── ROCE fallback for containers without RDMA NICs ──
+    lines.append("export HCCL_INTRA_ROCE_ENABLE=1")
+    lines.append("export ASCEND_BUFFER_POOL=4:8")
     mc_vars = " ".join(f"{k}={v}" for k, v in MC_ENV.items())
     if mc_vars:
         lines.append(f"export {mc_vars}")
