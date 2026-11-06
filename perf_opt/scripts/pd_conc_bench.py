@@ -45,9 +45,9 @@ def _send_prefill(prompt, transfer_id, timeout=300):
     payload = {
         "model": "dsv4", "prompt": prompt,
         "max_tokens": 1, "temperature": 0.0, "stream": False,
-        "kv_transfer_params": json.dumps({
+        "kv_transfer_params": {
             "do_remote_decode": True, "transfer_id": transfer_id,
-        }),
+        },
     }
     t0 = time.perf_counter()
     req = urllib.request.Request(
@@ -67,11 +67,11 @@ def _send_decode(prompt, transfer_id, engine_id, max_tokens=200, timeout=300):
     payload = {
         "model": "dsv4", "prompt": prompt,
         "max_tokens": max_tokens, "temperature": 0.0, "stream": False,
-        "kv_transfer_params": json.dumps({
+        "kv_transfer_params": {
             "do_remote_prefill": True,
             "remote_engine_id": engine_id,
             "remote_bootstrap_addr": BOOTSTRAP,
-        }),
+        },
     }
     t0 = time.perf_counter()
     req = urllib.request.Request(
