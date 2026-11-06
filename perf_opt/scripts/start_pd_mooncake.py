@@ -267,22 +267,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    common_env = [
-        "OMP_PROC_BIND=false", "OMP_NUM_THREADS=10",
-        "PYTORCH_NPU_ALLOC_CONF=expandable_segments:True",
-    ]
-    lines.append("export " + " ".join(common_env))
-    lines.append("export HCCL_INTRA_ROCE_ENABLE=1")
-    lines.append("export ASCEND_BUFFER_POOL=4:8")
-    mc_vars = " ".join(f"{k}={v}" for k, v in MC_ENV.items())
-    lines.append(f"export {mc_vars}")
-    lines.append(
-        "export HCCL_BUFFSIZE=1024 TASK_QUEUE_ENABLE=1 "
-        "HCCL_OP_EXPANSION_MODE=AIV VLLM_ASCEND_ENABLE_FLASHCOMM1=1"
-    )
-    lines.append(f"export ASCEND_RT_VISIBLE_DEVICES={devices}")
-    lines.append(f"export _PD_ARGS_FILE={args_file}")
-    lines.append(f"cd {PROJECT}")
-    launcher = f"{SCRIPTS}/start_pd_mooncake.py"
-    lines.append(f"exec python3 {launcher} 2>&1 | tee {logfile}")
-    return "\n".join(lines) + "\n"
