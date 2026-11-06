@@ -6,7 +6,7 @@ Supports serve mode (_PD_ARGS_FILE set) and orchestrator mode (--serial).
 Reconstructed 2026-11-06 from patches & arg dumps. Zero LD pollution:
 no LD_PRELOAD, no LD_LIBRARY_PATH mooncake (connector preloads its own deps via ctypes).
 """
-import argparse, asyncio, json, os, sys, time
+import argparse, json, os, sys, time
 
 PROJECT = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test"
 MODEL = f"{PROJECT}/models/DeepSeek-V4-Flash-w8a8-npu16"
@@ -138,8 +138,9 @@ def generate_shell_script(name, devices, args_file, logfile):
 # ═══════════════════════════════════════════════════════════════════════════
 # Serve mode (called by the shell script with _PD_ARGS_FILE set)
 # ═══════════════════════════════════════════════════════════════════════════
-async def serve_mode():
+def serve_mode():
     """Read args from _PD_ARGS_FILE and launch vllm API server."""
+    import subprocess as sp
     args_file = os.environ.get("_PD_ARGS_FILE", "")
     if not args_file:
         print("[serve] ERROR: _PD_ARGS_FILE not set", file=sys.stderr)
@@ -147,13 +148,9 @@ async def serve_mode():
     with open(args_file) as f:
         cli_args = json.load(f)
     print(f"[serve] Args loaded from {args_file}: {len(cli_args)} tokens")
-    from vllm.entrypoints.openai.api_server import main as vllm_main
-    old_argv = sys.argv
-    sys.argv = ["vllm", "serve"] + cli_args
-    try:
-        await vllm_main()
-    finally:
-        sys.argv = old_argv
+    cmd = ["vllm", "serve"] + cli_args
+    print(f"[serve] Starting: vllm serve ...")
+    sys.exit(sp.run(cmd).returncode)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -257,7 +254,7 @@ def main():
     ns = parser.parse_args()
 
     if os.environ.get("_PD_ARGS_FILE"):
-        asyncio.run(serve_mode())
+        serve_mode()
     elif ns.serial:
         orchestrator_mode()
     else:
