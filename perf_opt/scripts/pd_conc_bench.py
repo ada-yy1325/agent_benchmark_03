@@ -1,110 +1,86 @@
 #!/usr/bin/env python3
 """
-PD Concurrent Benchmark Client (reconstructed 2026-11-06).
-Two-stage: Stage1 P prefill pool → Stage2 D decode pool.
-Usage: python3 pd_conc_bench.py --num-requests 64 --p-concurrency 32 --d-concurrency 32 --input-chars 5400
+PD Concurrent Benchmark Client (v2, 2026-11-06).
+Single-stage concurrent requests to D (8001).
+PD KV cache transfer is handled internally by Mooncake connector.
+Usage:
+  python3 pd_conc_bench.py --num-requests 64 --concurrency 32 --input-chars 5400 --output-tokens 200
 """
 import argparse, json, time, sys, statistics, uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import urllib.request
 
-P_URL = "http://127.0.0.1:8000/v1/completions"
-D_URL = "http://127.0.0.1:8001/v1/completions"
-BOOTSTRAP = "http://127.0.0.1:8000"
-P_LOG = "/tmp/pd_test/prefill_v2.log"
-
-
-def _get_engine_id(timeout=120):
-    """Extract P engine_id from prefill log.
-    vLLM 0.23 removed /query endpoint.
-    Engine ID = kv_ip:kv_port (default if not set in config).
-    """
-    import re, os
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            if not os.path.exists(P_LOG):
-                time.sleep(2)
-                continue
-            with open(P_LOG, "r", errors="replace") as f:
-                text = f.read()
-            ip_m = re.search(r"kv_ip='([^']+)'", text)
-            port_m = re.search(r"kv_port=(\d+)", text)
-            if ip_m and port_m:
-                engine_id = f"{ip_m.group(1)}:{port_m.group(1)}"
-                print(f"[bench] extracted engine_id={engine_id}")
-                return engine_id
-        except Exception as e:
-            print(f"[bench] _get_engine_id retry: {e}")
-        time.sleep(2)
-    raise RuntimeError("Cannot extract engine_id from prefill log")
-
-
-def _send_prefill(prompt, transfer_id, timeout=300):
-    """Send one prefill request to P (max_tokens=1)."""
+def _send_request(prompt, max_tokens, timeout=300):
+    """Send one completion request, read streaming response to capture TTFT."""
     payload = {
-        "model": "dsv4", "prompt": prompt,
-        "max_tokens": 1, "temperature": 0.0, "stream": False,
-        "kv_transfer_params": {
-            "do_remote_decode": True, "transfer_id": transfer_id,
-        },
+        "model": "dsv4",
+        "prompt": prompt,
+        "max_tokens": max_tokens,
+        "temperature": 0.0,
+        "stream": True,
     }
-    t0 = time.perf_counter()
     req = urllib.request.Request(
-        P_URL, data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"}, method="POST",
+        D_URL,
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
     )
+    t0 = time.perf_counter()
+    ttft_ms = -1
+    total_tokens = 0
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            json.loads(r.read())
+            # Parse SSE streaming response
+            buf = b""
+            while True:
+                chunk = r.read(65536)
+                if not chunk:
+                    break
+                buf += chunk
+                # Process complete lines
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    lstr = line.decode("utf-8", errors="replace").strip()
+                    if not lstr or lstr.startswith(":"):
+                        continue
+                    if lstr.startswith("data: "):
+                        data_str = lstr[6:]
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            obj = json.loads(data_str)
+                            choices = obj.get("choices", [])
+                            if choices and ttft_ms < 0:
+                                ttft_ms = (time.perf_counter() - t0) * 1000
+                            total_tokens += 1
+                        except json.JSONDecodeError:
+                            pass
         elapsed = (time.perf_counter() - t0) * 1000
-        return {"transfer_id": transfer_id, "prefill_ms": elapsed, "ok": True}
+        return {
+            "e2e_ms": elapsed,
+            "ttft_ms": ttft_ms if ttft_ms >= 0 else elapsed,
+            "out_tokens": total_tokens,
+            "ok": True,
+        }
     except Exception as e:
         elapsed = (time.perf_counter() - t0) * 1000
-        return {"transfer_id": transfer_id, "prefill_ms": elapsed, "ok": False, "error": str(e)}
-def _send_decode(prompt, transfer_id, engine_id, max_tokens=200, timeout=300):
-    """Send one decode request to D. Returns TTFT, output tokens."""
-    payload = {
-        "model": "dsv4", "prompt": prompt,
-        "max_tokens": max_tokens, "temperature": 0.0, "stream": False,
-        "kv_transfer_params": {
-            "do_remote_prefill": True,
-            "remote_engine_id": engine_id,
-            "remote_bootstrap_addr": BOOTSTRAP,
-        },
-    }
-    t0 = time.perf_counter()
-    req = urllib.request.Request(
-        D_URL, data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"}, method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            resp = json.loads(r.read())
-        elapsed = (time.perf_counter() - t0) * 1000
-        out_tokens = resp.get("usage", {}).get("completion_tokens", 0)
-        return {"transfer_id": transfer_id, "e2e_ms": elapsed,
-                "out_tokens": out_tokens, "ok": True}
-    except Exception as e:
-        elapsed = (time.perf_counter() - t0) * 1000
-        return {"transfer_id": transfer_id, "e2e_ms": elapsed,
-                "out_tokens": 0, "ok": False, "error": str(e)}
+        return {"e2e_ms": elapsed, "ttft_ms": -1, "out_tokens": 0,
+                "ok": False, "error": str(e)}
+
+
 def _pct(data, p):
-    """Compute p-th percentile (linear interpolation)."""
     if not data:
         return -1
     s = sorted(data)
     k = (len(s) - 1) * p / 100.0
-    f = int(k)
-    c = k - f
+    f, c = int(k), k - int(k)
     return s[f] + c * (s[f + 1] - s[f]) if f + 1 < len(s) else s[f]
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--num-requests", type=int, default=16)
-    ap.add_argument("--p-concurrency", type=int, default=1)
-    ap.add_argument("--d-concurrency", type=int, default=1)
+    ap.add_argument("--concurrency", type=int, default=1)
     ap.add_argument("--input-chars", type=int, default=5400)
     ap.add_argument("--output-tokens", type=int, default=200)
     args = ap.parse_args()
@@ -113,88 +89,67 @@ def main():
     prompt_base = ("Please analyze:\n\n" + prompt_word)[:args.input_chars]
     tasks = [{
         "idx": i,
-        "transfer_id": f"c_{i}_{uuid.uuid4().hex[:8]}",
+        "id": f"r{i}_{uuid.uuid4().hex[:6]}",
         "prompt": prompt_base + f" [req_{i}]",
     } for i in range(args.num_requests)]
 
-    print(f"[bench] {args.num_requests} req, P_c={args.p_concurrency}, "
-          f"D_c={args.d_concurrency}, prompt~{args.input_chars}ch")
-    print("[bench] Fetching engine_id ...")
-    engine_id = _get_engine_id()
-    print(f"[bench] engine_id={engine_id}")
+    print(f"[bench] PD v2 — {args.num_requests} req @ c{args.concurrency} "
+          f"→ D:8001, prompt~{args.input_chars}ch, max_tokens={args.output_tokens}")
 
-    # Stage 1: Prefill
-    print(f"\n[stage1] Prefill @ P_c={args.p_concurrency}")
-    t1 = time.perf_counter()
-    pr = {}
-    with ThreadPoolExecutor(max_workers=args.p_concurrency) as pool:
-        futs = {pool.submit(_send_prefill, t["prompt"], t["transfer_id"]): t["idx"]
-                for t in tasks}
-        for f in as_completed(futs):
+    t0 = time.perf_counter()
+    results = {}
+    with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
+        futures = {
+            pool.submit(_send_request, t["prompt"], args.output_tokens): t["idx"]
+            for t in tasks
+        }
+        for f in as_completed(futures):
             r = f.result()
-            pr[r["transfer_id"]] = r
-    w1 = time.perf_counter() - t1
-    pt = [r["prefill_ms"] for r in pr.values() if r["ok"]]
-    pf = sum(1 for r in pr.values() if not r["ok"])
-    pp50 = statistics.median(pt) if pt else -1
-    # Print first 3 failures for debugging
-    fails = [r for r in pr.values() if not r["ok"]]
-    for f in fails[:3]:
-        print(f"[stage1] FAIL id={f['transfer_id']}: {f.get('error','?')}")
-    print(f"[stage1] wall={w1:.1f}s, ok={len(pt)}, fail={pf}, "
-          f"prefill_p50={pp50:.0f}ms")
+            idx = futures[f]
+            results[idx] = r
 
-    # Stage 2: Decode
-    print(f"\n[stage2] Decode @ D_c={args.d_concurrency}")
-    t2 = time.perf_counter()
-    dr = {}
-    with ThreadPoolExecutor(max_workers=args.d_concurrency) as pool:
-        futs = {pool.submit(_send_decode, t["prompt"], t["transfer_id"],
-                            engine_id, args.output_tokens): t["idx"]
-                for t in tasks}
-        for f in as_completed(futs):
-            r = f.result()
-            dr[r["transfer_id"]] = r
-    w2 = time.perf_counter() - t2
-    et = [r["e2e_ms"] for r in dr.values() if r["ok"]]
-    to = sum(r["out_tokens"] for r in dr.values() if r["ok"])
-    df = sum(1 for r in dr.values() if not r["ok"])
-    # Print first 3 decode failures
-    dfails = [r for r in dr.values() if not r["ok"]]
-    for f in dfails[:3]:
-        print(f"[stage2] FAIL id={f['transfer_id']}: {f.get('error','?')}")
-    ep50 = statistics.median(et) if et else -1
-    ep99 = _pct(et, 99) if et else -1
-    tp = to / w2 if w2 > 0 else 0
+    wall = time.perf_counter() - t0
+
+    ttft_vals = [r["ttft_ms"] for r in results.values() if r["ok"]]
+    e2e_vals = [r["e2e_ms"] for r in results.values() if r["ok"]]
+    total_out = sum(r["out_tokens"] for r in results.values() if r["ok"])
+    fail = sum(1 for r in results.values() if not r["ok"])
+
+    if fail:
+        for i, r in results.items():
+            if not r["ok"]:
+                print(f"[bench] FAIL r{i}: {r.get('error','?')}")
+
+    throughput = total_out / wall if wall > 0 else 0
 
     print(f"\n{'='*60}")
-    print(f"RESULTS  c=(P{args.p_concurrency}/D{args.d_concurrency})  "
-          f"n={args.num_requests}  prompt~{args.input_chars}ch")
+    print(f"RESULTS  c={args.concurrency}  n={args.num_requests}  "
+          f"prompt~{args.input_chars}ch")
     print(f"{'='*60}")
-    print(f"  P prefill p50 : {pp50:.0f}ms  (stage wall={w1:.1f}s, fail={pf})")
-    print(f"  D TTFT(E2E)   : p50={ep50:.0f}ms  p99={ep99:.0f}ms")
-    print(f"  D stage wall  : {w2:.1f}s  fail={df}")
-    print(f"  Total output  : {to} tokens")
-    print(f"  Throughput    : {tp:.1f} tok/s")
+    print(f"  TTFT p50      : {_pct(ttft_vals, 50):.0f}ms  "
+          f"p99: {_pct(ttft_vals, 99):.0f}ms")
+    print(f"  E2E  p50      : {_pct(e2e_vals, 50):.0f}ms  "
+          f"p99: {_pct(e2e_vals, 99):.0f}ms")
+    print(f"  Wall time     : {wall:.1f}s")
+    print(f"  Total output  : {total_out} tokens")
+    print(f"  Throughput    : {throughput:.1f} tok/s")
+    print(f"  Success       : {len(ttft_vals)}/{args.num_requests}")
     print(f"{'='*60}")
 
     result = {
-        "p_concurrency": args.p_concurrency,
-        "d_concurrency": args.d_concurrency,
+        "concurrency": args.concurrency,
         "num_requests": args.num_requests,
         "input_chars": args.input_chars,
         "output_tokens": args.output_tokens,
-        "stage1_wall_s": w1,
-        "stage2_wall_s": w2,
-        "prefill_p50_ms": pp50,
-        "d_e2e_p50_ms": ep50,
-        "d_e2e_p99_ms": ep99,
-        "total_output_tokens": to,
-        "throughput_tok_s": tp,
-        "prefill_ok": len(pt),
-        "prefill_fail": pf,
-        "decode_ok": len(et),
-        "decode_fail": df,
+        "wall_s": wall,
+        "ttft_p50_ms": _pct(ttft_vals, 50),
+        "ttft_p99_ms": _pct(ttft_vals, 99),
+        "e2e_p50_ms": _pct(e2e_vals, 50),
+        "e2e_p99_ms": _pct(e2e_vals, 99),
+        "total_output_tokens": total_out,
+        "throughput_tok_s": throughput,
+        "ok": len(ttft_vals),
+        "fail": fail,
     }
     print(json.dumps(result, indent=2))
 
