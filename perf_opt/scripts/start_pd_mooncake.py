@@ -136,21 +136,24 @@ ADDITIONAL_CONFIG = json.dumps({
 }, separators=(",", ":"))
 
 # ── Common kv_connector_extra_config ───────────────────────────────────────
+# DeepSeek V4 on Ascend: tp=8, dp=1 (8 NPUs per role)
 KV_EXTRA = {
-    "mooncake_protocol": "ascend",
     "prefill": {"dp_size": 1, "tp_size": 8},
-    "decode": {"dp_size": 1, "tp_size": 8},
+    "decode":  {"dp_size": 1, "tp_size": 8},
 }
 
 
 def build_kv_config(role: str, rank: int) -> str:
     """Build kv-transfer-config JSON for producer or consumer."""
+    # kv_port: P=20001, D=20002 (official convention)
+    kv_port = 20001 if role == "kv_producer" else 20002
     cfg = {
         "kv_connector": "MooncakeConnector",
+        "kv_buffer_device": "npu",
         "kv_role": role,
-        "kv_parallel_size": 2,
+        "kv_parallel_size": 1,
         "kv_ip": "127.0.0.1",
-        "kv_port": 38000,
+        "kv_port": str(kv_port),
         "kv_rank": rank,
         "kv_buffer_size": 8_000_000_000.0,
         "kv_load_failure_policy": "fail",
@@ -172,8 +175,11 @@ def build_args(prefill: bool, port: int) -> list:
         "--gpu-memory-utilization", "0.9",
         "--max-num-seqs", "64",
         "--data-parallel-size", "1",
+        "--data-parallel-address", "localhost",
+        "--data-parallel-rpc-port", "9100",
         "--tensor-parallel-size", "8",
         "--enable-expert-parallel",
+        "--enforce-eager",
         "--quantization", "ascend",
         "--block-size", "128",
         "--compilation-config", '{"cudagraph_mode":"FULL_DECODE_ONLY"}',
@@ -185,9 +191,8 @@ def build_args(prefill: bool, port: int) -> list:
         "--reasoning-parser", "deepseek_v4",
     ]
     if prefill:
-        # Prefill: enforce-eager + MTP=1 (speculative)
+        # Prefill: MTP=1 (speculative decode) for faster prefill
         args += [
-            "--enforce-eager",
             "--speculative-config",
             json.dumps({
                 "num_speculative_tokens": 1,
