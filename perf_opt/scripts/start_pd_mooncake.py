@@ -100,8 +100,9 @@ def generate_shell_script(name, devices, args_file, logfile):
         "PYTORCH_NPU_ALLOC_CONF=expandable_segments:True",
     ]
     lines.append("export " + " ".join(common_env))
-    lines.append("export HCCL_INTRA_ROCE_ENABLE=1")
-    lines.append("export ASCEND_BUFFER_POOL=4:8")
+    # DISABLED for basic_string diagnosis
+    # lines.append("export HCCL_INTRA_ROCE_ENABLE=1")
+    # lines.append("export ASCEND_BUFFER_POOL=4:8")
     mc_vars = " ".join(f"{k}={v}" for k, v in MC_ENV.items())
     if mc_vars:
         lines.append(f"export {mc_vars}")
