@@ -10,6 +10,8 @@ import argparse, json, time, sys, statistics, uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import urllib.request
 
+D_URL = "http://127.0.0.1:8001/v1/completions"
+
 def _send_request(prompt, max_tokens, timeout=300):
     """Send one completion request, read streaming response to capture TTFT."""
     payload = {
