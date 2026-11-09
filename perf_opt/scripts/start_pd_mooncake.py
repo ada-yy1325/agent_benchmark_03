@@ -25,10 +25,11 @@ TMP = "/tmp/pd_test"
 # These were reconstructed from the engine binary's getenv strings (11-06).
 MC_ENV = {
     # ── TCP / Networking (loopback-only, no RDMA/IB/EFA) ──
-    # MC_FORCE_TCP deliberately UNSET. Ascend Direct transport is required
-    # for NPU device memory handling. Error 103900 (HcclRegisterGlobalMem
-    # overlap in multi-process TP=8) is tolerated by
-    # patch_adxl_103900.py in ascend_direct_transport.cpp.
+    # MC_FORCE_TCP=1: Route B. Ascend Direct transport failed because
+    # HcclRegisterGlobalMem rejects torch_npu KV cache buffers (103900
+    # even on first worker). TCP mode + connector patches (untyped_storage
+    # dedup + data-length split) was verified working on 2026-11-02.
+    "MC_FORCE_TCP": "1",
     "MC_TCP_ENABLE_CONNECTION_POOL": "0",
     "MC_TCP_PROTO": "tcp",
     "MC_TCP_BIND_ADDRESS": "127.0.0.1",
