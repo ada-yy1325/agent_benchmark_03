@@ -1,169 +1,264 @@
-# PD 分离任务交接书（2026-11-06，给下一位 Agent）
+# PD 分离任务交接书（2026-11-09，最终版）
+
+> 此文档覆盖之前所有版本。读完此文档即可全面了解 PD 分离任务的**现状、问题、进度、下一步**。
+
+---
 
 ## 〇、当前阻塞（一句话）
 
-PD 双服务（prefill + decode）无法启动——worker 初始化时 mooncake 引擎崩溃 `std::logic_error: basic_string::_S_construct null not valid`。**修复只需编辑 launcher 一行，然后重启 PD，跑 c32。** 详情见第五节。
+**inspire CLI 连接远程实例 `quant-test` 失败**——实例已 RUNNING（16×910B, GPU 0%），但 `inspire notebook exec` 卡死无响应，连 `echo hello` 都不返回。怀疑是 11-09 实例重新启动后 CLI 缓存的 SSH 通道信息过期。此问题解决后，以下配置修正 + 启动 + 验证可一小时内完成。
 
-## 一、任务目标
+---
 
-在昇腾 910B2C ×16（quant-test 实例）上，给 DeepSeek-V4-Flash（W8A8 量化，280GB）的 PD 分离做**并发扫射 c32 基准**，补齐最后的吞吐天花板数据。已完成 c1/c4/c8/c16（见第三节），只剩 c32。
+## 一、PD 分离进度总结
 
-**最终任务清单**（优先级从高到低）：
-1. 修复 PD 启动 → c32 基准 → 得出完整并发曲线
-2. 成绩单 `full_optimization_summary.md` 更新 c32 数据
-3. logbook 更新 11-06 记录
-4. 镜像保存 + 关闭实例（double check STOPPED）
-5. 全程邮件汇报 yyc2660109300@outlook.com
+### 1.1 已跑通的
 
-## 二、环境全貌（11-06 当前状态）
-
-| 项目 | 值 |
-|:-----|:-----|
-| 实例 | `quant-test` / workspace `昇腾卡公共空间` |
-| 当前镜像 | `glm53-w8a8-env:stopsave-quant-test-b0247-20261104175443`（11-04 用户手动保存，含全部 PD 修复） |
-| 当前节点 | `infra-gpu-npu-430.host.shzhisuan.com`（可能在 ticks 之间自动变更） |
-| 模型 | `/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-npu16`（280GB） |
-| vLLM | 0.23.0 + vllm-ascend；CANN 9.0.0；Python 3.13 |
-| Mooncake 引擎 | 自编译 Ascend 版（engine.so + ascend_transport.so），构建树在 `/inspire/sj-ssd3/project/project-public/s26068/mooncake-src/build` |
-| 远端 repo | `/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test`（git main, 最新提交 87b9520） |
-| 远程连接 | `inspire notebook exec quant-test --workspace 昇腾卡公共空间 '<cmd>'`；如需上传文件用 hex 分块（<1500 字符/块，`bytes.fromhex` + mode=`wb`/`ab` + stdin=`subprocess.DEVNULL`） |
-
-## 三、已完成的成果（全部已保存，不可丢失）
-
-### 3.1 并发扫射数据（11-04，同一镜像，已验证）
-
-| 并发 (P/D) | 请求数 | P prefill p50 | D TTFT p50 | D TTFT p99 | 吞吐 | vs c1 |
-|:--|:--|:--|:--|:--|:--|:--|
-| c=1 | 16 | 254ms | 394ms | — | 39.5 tok/s | 1× |
-| c=4 | 32 | — | 394ms | 655ms | 149.8 tok/s | 3.8× |
-| c=8 | 32 | 1235ms | 599ms | 721ms | 274.6 tok/s | 7.0× |
-| c=16 | 64 | 2202ms | 617ms | 1017ms | 486.2 tok/s | 12.3× |
-| c=32 | 64 | **❌ 未跑** | | | | |
-
-趋势：吞吐随并发线性爬升至 486.2 tok/s（vs 单服 MTP ON c32=781.8 的 62%）。P 是绝对瓶颈（prefill 排队从 254ms 暴涨到 2202ms），D TTFT p50 几乎不退化。c32 可能继续爬升或遇到 P 完全饱和的天花板——这是唯一缺失的数据点。
-
-### 3.2 成绩单 (full_optimization_summary.md)
-
-**本地路径**：`perf_opt/summary/full_optimization_summary.md`
-
-已包含：
-- 章节 1-6：MTP 优化、双独立 TP8、基线数据、选择指引（全部最终定稿）
-- 章节 7：PD 分离完整实验（两条路线对照、跨场景全表 4K/16K、不对称部署失败记录、并发扫射数据）
-- 章节 8：资产索引与数据溯源
-
-**需要补充**：7.3.2 并发表加入 c32 行（c32 完成后执行）
-
-### 3.3 logbook
-
-**本地路径**：`logbook.md`
-
-最新条目：`# 2026-11-04 — PD 攻坚第九回合`（并发扫射 + metrics 分析）
-
-**需要补充**：11-05 和 11-06 的记录（c32 完成后执行）
-
-### 3.4 补丁归档
-
-**本地路径**：`perf_opt/scripts/pd_mooncake_patches/`（7 个补丁 + README 应用顺序与契约）
-
-这些补丁**已在当前 stopsave 镜像中全部应用完毕**，正常情况下无需重跑。如果容器重建或引擎 lib 被覆盖，按 README 重打。
-
-### 3.5 远端关键文件
-
-| 文件 | 用途 |
-|:-----|:-----|
-| `/tmp/pd_conc_bench.py` | 并发基准客户端（两阶段，P pool + D pool，支持 --p-concurrency/--d-concurrency/--num-requests/--input-chars） |
-| `/tmp/pd_orch_bench.py` | 编排基准客户端（单请求模式，含端到端计时和 TPOT 追踪） |
-| `/tmp/pd_metrics.py` | metrics 前后差值采集 |
-| `/tmp/fix_mooncake_libs.py` | 自动补全 mooncake 目录缺失的 CANN 依赖库 |
-| `/tmp/pd_test/_conc_c[1|4|8|16].log` | 11-04 四级并发原始日志 |
-| `/tmp/pd_test/_moonFINAL.log` | 最近一次 PD 启动日志（崩溃前） |
-| `/inspire/.../perf_opt/scripts/start_pd_mooncake.py` | PD 启动器（当前 git 版本 87b9520，需修一行） |
-
-## 四、成绩单中已修正的已知错误（已审计过，不要再动）
-
-1. **3.1 表**：原先假造了一个"MTP OFF"列（277.8+282.3），实为 c8 MTP=ON 数据。已更正为无双服务 MTP=OFF 实测数据（以单服投影说明 +47.6%）。
-2. **GPQA**：原先"vs 官方 72.22%"实为自量化旧版测试值（143/198），已更正为 ModelScope 官方 71.2%。
-3. **PD+MTP 比 PD 无 MTP 慢 128ms** 的异常点已配解释块（draft KV 同步与编排开销）。
-4. **接受率分点** ~98%/98%/96% 已标注为近似值，以全局 95.79% 为准。
-
-## 五、当前崩溃的根因与一步修复
-
-### 根因
-
-11-05/06 经历多轮反复修改 launcher 的环境变量、重启实例和镜像切换。最终确认的稳定配置需要**同时满足**以下条件：
-
-1. mooncake 目录只留核心 .so 文件（已做：21 个核心文件，34 个 CANN 重复库在 `bak_libs/`）
-2. LD_LIBRARY_PATH 末尾追加 mooncake 目录（`$LD_LIBRARY_PATH:/opt/mamba/lib/python3.13/site-packages/mooncake`）——系统 CANN 路径优先，mooncake 兜底
-3. 全部 MC_* 环境变量存在（git 版本有）——这些变量每一个都堵住 mooncake C++ 引擎里一个 `getenv()` 返回 NULL 后直接构造 `std::string` 导致的 `basic_string::_S_construct null not valid` 崩溃
-4. **删除 `LD_PRELOAD=/tmp/bt_hook2.so`**（10-30 的调试钩子文件已被容器重建清除，预加载无效文件导致所有子进程的 loader 报错）
-5. 连接器预加载补丁在岗（`PD fix: preload mooncake` 注释标识）
-
-git 恢复后的 launcher 满足条件 3、条件 4 不满足（LD_PRELOAD 指向不存在的文件）、条件 5 满足（镜像已含补丁）。
-
-### 修复
-
-launcher 文件：`/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/perf_opt/scripts/start_pd_mooncake.py`
-
-**第一步**：删除第 85 行（`export LD_PRELOAD=/tmp/bt_hook2.so`，git 版本里有）
-
-**第二步**：在第 85 行位置（删除后）插入：`export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/mamba/lib/python3.13/site-packages/mooncake`
-
-**第三步**：重启 PD：
-```bash
-pkill -9 -f "VLLM::" 2>/dev/null; pkill -9 -f start_pd_mooncake 2>/dev/null; tmux kill-server 2>/dev/null; sleep 2
-cd /inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test
-setsid nohup python3 -u perf_opt/scripts/start_pd_mooncake.py --serial > /tmp/pd_test/_moon.log 2>&1 < /dev/null &
-```
-
-**第四步**：等双健康（约 5-8 分钟图编译），监控：
-```bash
-# 每 30 秒检查
-curl -s -o /dev/null -w "%{http_code}" -m 4 http://127.0.0.1:8000/health
-curl -s -o /dev/null -w "%{http_code}" -m 4 http://127.0.0.1:8001/health
-# 如果崩溃立即检查 /tmp/pd_test/decode_v2.log 的 RuntimeError
-```
-
-**第五步**：双就绪后跑 c32：
-```bash
-setsid nohup python3 -u /tmp/pd_conc_bench.py --num-requests 64 --p-concurrency 32 --d-concurrency 32 --input-chars 5400 > /tmp/pd_test/_conc_c32.log 2>&1 < /dev/null &
-```
-
-### 验证修复是否生效的检查清单
-
-| 检查项 | 命令 | 期望 |
+| 项目 | 状态 | 详情 |
 |:--|:--|:--|
-| 引擎加载 | `python3 -c "from mooncake.engine import TransferEngine; e=TransferEngine(); print('OK')"` | OK |
-| 引擎+torch 共存 | `LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/mamba/.../mooncake ASCEND_RT_VISIBLE_DEVICES=0 python3 -c "import torch,torch_npu; from mooncake.engine import TransferEngine; e=TransferEngine(); print('BOTH OK')"` | BOTH OK |
-| mooncake 目录清洁 | `ls /opt/mamba/.../mooncake/*.so* | wc -l` | 21 |
-| CANN 重复库已移走 | `ls /opt/mamba/.../mooncake/bak_libs/ | wc -l` | 34 |
-| launcher 含 LD_LIBRARY_PATH | `grep "LD_LIBRARY_PATH.*mooncake" .../start_pd_mooncake.py` | 一行 |
-| launcher 不含 LD_PRELOAD | `grep "LD_PRELOAD" .../start_pd_mooncake.py` | 零行 |
-| launcher 含全部 MC_* 变量 | `grep -c "MC_METADATA_CLUSTER_ID" .../start_pd_mooncake.py` | 1 |
-| 连接器预加载在岗 | `grep -c "PD fix: preload" /opt/mamba/.../mooncake_connector.py` | 1 |
+| P/D 双服务启动 | ✅ 之前跑通过 | 通过 `start_pd_mooncake.py --serial` (tmux) |
+| c1/c4/c8/c16 并发扫射 | ✅ 11-04 完成 | 吞吐 39.5→149.8→274.6→486.2 tok/s |
+| KV 传输参数配置 | ⚠️ 配了但**没生效** | `external_kv_transfer = 0` |
+| Proxy 代码 | ✅ 已写好 | `pd_proxy.py` (152 行) |
+| 官方参考资料 | ✅ 已下载 | `mooncake_guide_official.md` + `pd_proxy_official.py` |
 
-### 环境崩溃回滚（如果修不好）
+### 1.2 致命发现（11-06）
 
-如果上述修复后 PD 仍崩溃，**放弃手修，从 stopsave 镜像重建**：
-1. 在 Web UI 把 quant-test 镜像切到 `stopsave-quant-test-b0247-20261104175443`
-2. 按本节"修复"步骤执行（LD_PRELOAD 删 + LD_LIBRARY_PATH 加）
-3. 该镜像已含全部 6 个连接器补丁，只需修 launcher 这一行
+**PD 分离一直没真正工作！** 证据来自 D 的 `/metrics` 端点：
 
-## 六、资产索引（全部路径，供下一位查验）
+```
+prompt_tokens_by_source{source="external_kv_transfer"} = 0.0   ← D 从未拉取 P 的 KV
+Num KV expired reqs = 32                                       ← P 产的 KV 块 480s 后过期
+```
 
-| 类别 | 路径 |
-|:-----|:-----|
-| 成绩单 | `perf_opt/summary/full_optimization_summary.md` |
-| logbook | `logbook.md` |
-| PD 补丁集 | `perf_opt/scripts/pd_mooncake_patches/README.md` |
-| PD 问题报告 | `perf_opt/PD_ISSUE_REPORT_1028.md` |
-| PD 操作手册 | `perf_opt/PD_HANDOFF_1028.md` |
-| 基线数据 | `perf_opt/results/mtp_model/`、`perf_opt/results/verify_1026/` |
-| 并发基准客户端 | 远端 `/tmp/pd_conc_bench.py` |
-| metrics 采集脚本 | 远端 `/tmp/pd_metrics.py` |
-| PD 启动器 | 远端 `.../perf_opt/scripts/start_pd_mooncake.py` |
-| 模型 | 远端 `.../models/DeepSeek-V4-Flash-w8a8-npu16` |
-| 引擎构建树 | 远端 `/inspire/.../mooncake-src/build` |
-| 镜像 | `glm53-w8a8-env:stopsave-quant-test-b0247-20261104175443` |
-| git tag | `perf-opt-final` |
-| 本地 git 最新提交 | 77870c0 |
-| 远端 git 最新提交 | 87b9520 |
+**根因**：之前没有 Proxy。用户直接请求 D，D 只用本地 prefill，KV 传输形同虚设。
+
+### 1.3 本次（11-09）新发现的配置问题
+
+完整阅读 `start_pd_mooncake.py`（362 行）和官方指南后，发现 5 个待修正之处：
+
+#### ❌ 问题 1：`--enforce-eager` 与 cudagraph 冲突
+
+```python
+# Line 182: 禁用了 cudagraph
+"--enforce-eager",
+# Line 185: 又开了 cudagraph（被上面覆盖，无效！）
+"--compilation-config", '{"cudagraph_mode":"FULL_DECODE_ONLY"}',
+```
+
+**修正**：去掉 `--enforce-eager`，保留 cudagraph（11-03 测试证实 cudagraph 比 eager 快 ~300ms）。
+
+#### ❌ 问题 2：P 侧加了 MTP speculative decode
+
+P 的 build_args 中有 `if prefill:` 分支加了 `--speculative-config`，Prefill 只出 1 token，MTP 对它完全无意义。
+
+**修正**：删除 P 的 `--speculative-config`。D 侧如需 MTP 单独加。
+
+#### ⚠️ 问题 3：`kv_connector` 名称需确认
+
+当前用 `"MooncakeConnector"`，官方 v0.10.1 指南用 `"MooncakeConnectorV1"`。需远程确认 v0.23.0 正确名称。
+
+#### ⚠️ 问题 4：kv_config 多余/缺失字段
+
+删 `"kv_ip": "127.0.0.1"`（官方无此字段），加 `"engine_id": rank`（官方有）。
+
+#### ⚠️ 问题 5：DP 参数在 dp=1 时多余
+
+`--data-parallel-address` / `--data-parallel-rpc-port` 在 dp=1 时无意义，保留无害但可清理。
+
+---
+
+## 二、当前架构（修正后）
+
+```
+                        ┌─────────────────┐
+                        │   pd_proxy.py   │
+                        │   :8002          │
+                        └───┬─────────┬───┘
+                   Stage 1  │         │  Stage 2
+                   (prefill)│         │  (decode + kv_transfer_params)
+              ┌─────────────▼──┐  ┌──▼─────────────┐
+              │  P (prefill)   │  │  D (decode)    │
+              │  Port: 8000    │  │  Port: 8001    │
+              │  NPU: 0-7      │  │  NPU: 8-15     │
+              │  tp=8          │  │  tp=8          │
+              │  kv_producer   │  │  kv_consumer   │
+              │  kv_port=20001 │  │  kv_port=20002 │
+              │  engine_id=0   │  │  engine_id=1   │
+              └────────────────┘  └────────────────┘
+```
+
+**数据流**：
+1. Client → Proxy(:8002) `/v1/completions`
+2. Proxy → P(:8000) prefill（P 做前向传播，存 KV 到 NPU buffer）
+3. P 返回 response（含 `kv_transfer_params`）
+4. Proxy 取出 `kv_transfer_params` → 注入请求 → D(:8001)
+5. D 通过 Mooncake 传输层从 P 拉 KV 块 → 做 decode（生成 tokens）
+6. Proxy 透传流式响应到 Client
+
+**成功验证标志**：
+```bash
+curl -s http://127.0.0.1:8001/metrics | grep 'external_kv_transfer'
+# 期望：prompt_tokens_by_source_total{source="external_kv_transfer"} > 0
+```
+
+---
+
+## 三、远程连通性修复（当前阻塞）
+
+### 现象
+- `inspire notebook list` → quant-test 显示 **RUNNING**
+- `inspire notebook metrics` → GPU 0%，无残留进程
+- `inspire notebook exec` → **卡死**，连 `echo hello` 都不返回
+
+### 已尝试
+- 升级 inspire CLI：v7.1.14 → v7.1.16 ✅
+- 杀掉所有卡死进程（pkill -9 inspire）✅
+- 多次重试 exec → 全部失败
+
+### 下一步尝试（按优先级）
+1. **`inspire notebook stop` + `inspire notebook start`** 完全重启实例
+2. **`inspire notebook shell`** 交互终端（不同的连接方式）
+3. **清除 inspire 缓存**：`rm -rf ~/.inspire/cache*`
+4. 如果以上都无效，**通过启智 Web 控制台的 Web Terminal** 直接进入容器
+
+---
+
+## 四、README：连接恢复后正确流程
+
+### 4.1 启动全栈（严格顺序）
+
+```bash
+# Step 0: Git pull 最新代码
+cd /inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test
+git fetch origin && git reset --hard origin/main
+
+# Step 1: 启动 D（decode）
+tmux new-session -d -s pd_d \
+  "ASCEND_RT_VISIBLE_DEVICES=8,9,10,11,12,13,14,15 \
+   python3 perf_opt/scripts/start_pd_mooncake.py 2>&1 | tee /tmp/pd_d.log"
+
+while ! curl -s http://127.0.0.1:8001/health > /dev/null 2>&1; do
+    echo "$(date): waiting for D..."; sleep 10
+done
+echo "✅ D healthy (8001)"
+
+# Step 2: 启动 P（prefill）
+tmux new-session -d -s pd_p \
+  "ASCEND_RT_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
+   python3 perf_opt/scripts/start_pd_mooncake.py 2>&1 | tee /tmp/pd_p.log"
+
+while ! curl -s http://127.0.0.1:8000/health > /dev/null 2>&1; do
+    echo "$(date): waiting for P..."; sleep 10
+done
+echo "✅ P healthy (8000)"
+
+# Step 3: 启动 Proxy
+nohup python3 perf_opt/scripts/pd_proxy.py \
+  --prefill-url http://127.0.0.1:8000 \
+  --decode-url http://127.0.0.1:8001 \
+  --port 8002 > /tmp/pd_proxy.log 2>&1 &
+echo "✅ Proxy started (8002)"
+
+# Step 4: 验证 KV 传输
+curl -s -X POST http://127.0.0.1:8002/v1/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"dsv4","prompt":"Hello, how are you?","max_tokens":20}'
+
+curl -s http://127.0.0.1:8001/metrics | grep -E "external_kv_transfer|kv_expired"
+# 期望: external_kv_transfer > 0
+```
+
+### 4.2 跑并发基准
+
+```bash
+for c in 1 4 8 16 32; do
+    python3 perf_opt/scripts/pd_conc_bench.py \
+      --prefill-url http://127.0.0.1:8000 \
+      --decode-url http://127.0.0.1:8001 \
+      --p-concurrency $c --d-concurrency $c --num-requests 64 \
+      --input-chars 4000 2>&1 | tee /tmp/pd_bench_c${c}.log
+done
+```
+
+### 4.3 关闭
+
+```bash
+tmux kill-session -t pd_p 2>/dev/null
+tmux kill-session -t pd_d 2>/dev/null
+pkill -f pd_proxy.py
+
+# 保存结果
+mkdir -p /inspire/.../perf_opt/results/pd_1109/
+cp /tmp/pd_bench_c*.log /inspire/.../perf_opt/results/pd_1109/
+```
+---
+
+## 五、待修正的代码（start_pd_mooncake.py）
+
+### 5.1 build_args() 改动
+
+删除 `--enforce-eager`（line 182）和 P 的 `--speculative-config`（lines 193-202）。
+保留 cudagraph（`--compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY"}'`）。
+
+### 5.2 build_kv_config() 改动
+
+删除 `"kv_ip": "127.0.0.1"`（line 155），增加 `"engine_id": rank`。
+确认 `kv_connector` 名称（`MooncakeConnector` vs `MooncakeConnectorV1`）。
+
+### 5.3 改动对照
+
+| 行号 | 旧值 | 新值 | 原因 |
+|:--|:--|:--|:--|
+| 182 | `"--enforce-eager",` | *(删除)* | 与 cudagraph 冲突；cudagraph 更快 |
+| 193-202 | P 的 MTP speculative config | *(删除)* | P 只出 1 token，MTP 无意义 |
+| 151 | `"MooncakeConnector"` | 需远程确认 | 可能应为 `MooncakeConnectorV1` |
+| 155 | `"kv_ip": "127.0.0.1"` | *(删除)* | 官方指南无此字段 |
+| — | *(缺失)* | `"engine_id": rank` | 官方指南有；P=0, D=1 |
+
+---
+
+## 六、参考资料
+
+| 文件 | 路径 | 用途 |
+|:--|:--|:--|
+| 官方 Mooncake 指南 | `perf_opt/scripts/mooncake_guide_official.md` | v0.10.1 官方部署指南 |
+| 官方 Proxy 参考 | `perf_opt/scripts/pd_proxy_official.py` | 1214 行完整实现 |
+| 当前 PD 启动器 | `perf_opt/scripts/start_pd_mooncake.py` | 362 行，需改 3 处 |
+| 最小 Proxy | `perf_opt/scripts/pd_proxy.py` | 152 行，1P1D 代理 |
+| 后台测试脚本 | `perf_opt/scripts/pd_test_background.py` | 自动化验证 |
+| 并发基准 | `perf_opt/scripts/pd_conc_bench.py` | c1-c32 扫射 |
+| Logbook | `logbook.md` | 最新条目 11-06（第十回合） |
+
+---
+
+## 七、快速状态检查清单
+
+恢复连接后，跑以下命令确认环境正常：
+
+```bash
+# 1. NPU 可用
+npu-smi info | head -10
+
+# 2. Python 正常
+python3 --version && python3 -c "import vllm; print(vllm.__version__)"
+
+# 3. 模型存在
+ls /inspire/.../models/DeepSeek-V4-Flash-w8a8-npu16/*.safetensors | head -3
+
+# 4. 代码最新
+cd /inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test
+git log --oneline -3
+
+# 5. 无残留进程
+ps aux | grep -E "vllm|VLLM" | grep -v grep
+ss -tlnp | grep -E "800[0-2]"
+
+# 6. Mooncake lib 完整
+ls /opt/mamba/lib/python3.13/site-packages/mooncake/engine.so 2>/dev/null \
+  && echo "engine.so OK" || echo "engine.so MISSING"
+```
+
+---
+
+*最后更新：2026-11-09 | 作者：Cline Agent | 状态：等待远程恢复后执行第四章*
