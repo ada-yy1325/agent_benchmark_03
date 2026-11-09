@@ -17,6 +17,9 @@ MOONCAKE_SRC = "/inspire/sj-ssd3/project/project-public/s26068/mooncake-src"
 MOONCAKE_LIB = "/opt/mamba/lib/python3.13/site-packages/mooncake"
 
 # --- Step 1: Locate the source file ---
+# There are TWO copies. The one actually compiled into ascend_transport.so
+# is under src/transport/ascend_transport/ascend_direct_transport/.
+# The TENT copy is newer but not compiled into the existing .so.
 candidates = []
 for root, dirs, files in os.walk(os.path.join(MOONCAKE_SRC, "mooncake-transfer-engine")):
     for f in files:
@@ -27,7 +30,14 @@ if not candidates:
     print("ERROR: ascend_direct_transport.cpp not found")
     sys.exit(1)
 
-src_file = candidates[0]
+# Prefer the non-TENT copy (the one actually compiled)
+src_file = None
+for c in candidates:
+    if "src/transport/ascend_transport" in c:
+        src_file = c
+        break
+if not src_file:
+    src_file = candidates[0]
 print(f"[patch] Found source: {src_file}")
 
 # --- Step 2: Read and patch ---
