@@ -149,7 +149,7 @@ def build_kv_config(role: str, rank: int) -> str:
     # kv_port: P=20001, D=20002 (official convention)
     kv_port = 20001 if role == "kv_producer" else 20002
     cfg = {
-        "kv_connector": "MooncakeConnectorV1",
+        "kv_connector": "MooncakeConnector",
         "kv_buffer_device": "npu",
         "kv_role": role,
         "kv_parallel_size": 1,
