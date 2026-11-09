@@ -148,11 +148,10 @@ def build_kv_config(role: str, rank: int) -> str:
     # kv_port: P=20001, D=20002 (official convention)
     kv_port = 20001 if role == "kv_producer" else 20002
     cfg = {
-        "kv_connector": "MooncakeConnector",
+        "kv_connector": "MooncakeConnectorV1",
         "kv_buffer_device": "npu",
         "kv_role": role,
         "kv_parallel_size": 1,
-        "kv_ip": "127.0.0.1",
         "kv_port": str(kv_port),
         "kv_rank": rank,
         "kv_buffer_size": 8_000_000_000.0,
@@ -179,7 +178,6 @@ def build_args(prefill: bool, port: int) -> list:
         "--data-parallel-rpc-port", "9100",
         "--tensor-parallel-size", "8",
         "--enable-expert-parallel",
-        "--enforce-eager",
         "--quantization", "ascend",
         "--block-size", "128",
         "--compilation-config", '{"cudagraph_mode":"FULL_DECODE_ONLY"}',
@@ -190,16 +188,6 @@ def build_args(prefill: bool, port: int) -> list:
         "--enable-auto-tool-choice",
         "--reasoning-parser", "deepseek_v4",
     ]
-    if prefill:
-        # Prefill: MTP=1 (speculative decode) for faster prefill
-        args += [
-            "--speculative-config",
-            json.dumps({
-                "num_speculative_tokens": 1,
-                "method": "mtp",
-                "enforce_eager": True,
-            }, separators=(",", ":")),
-        ]
     return args
 
 
