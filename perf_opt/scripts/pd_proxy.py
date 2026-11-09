@@ -3,9 +3,14 @@
 Minimal PD Proxy for vLLM-Ascend Mooncake PD disaggregation (1P1D).
 
 Architecture:
-  Client → Proxy(:8002) → P(:8000) prefill → get kv_transfer_params
-                        → D(:8001) decode (with kv_transfer_params)
+  Client → Proxy(:8002) → P(:8000) prefill (inject kv_transfer_params, max_tokens=1)
+                        → P returns kv_transfer_params
+                        → Proxy forwards to D(:8001) decode with kv_transfer_params
                         → streaming response back to client
+
+Based on official pd_proxy_official.py build_prefill_request pattern:
+  Stage 1: Send to P with kv_transfer_params={do_remote_decode: True}, max_tokens=1
+  Stage 2: P responds with kv_transfer_params → inject into request → send to D
 
 Usage:
   python3 pd_proxy.py --prefill-url http://127.0.0.1:8000 --decode-url http://127.0.0.1:8001 --port 8002
@@ -67,22 +72,53 @@ async def shutdown():
     if client:
         await client.aclose()
         client = None
+
+
 # ---------------------------------------------------------------------------
 # Two-stage routing
 # ---------------------------------------------------------------------------
+
+def _build_prefill_payload(original: dict) -> dict:
+    """Build payload for prefill-only request to P.
+
+    Per official vLLM Mooncake PD protocol:
+    - kv_transfer_params tells P: "do remote decode, save KV to Mooncake transport"
+    - max_tokens=1: P only outputs 1 token (stop token), saving full KV cache
+    - stream=False: prefill stage is not streaming
+    """
+    payload = original.copy()
+    payload["kv_transfer_params"] = {
+        "do_remote_decode": True,
+        "do_remote_prefill": False,
+        "remote_engine_id": None,
+        "remote_block_ids": None,
+        "remote_host": None,
+        "remote_port": None,
+    }
+    payload["stream"] = False
+    payload["max_tokens"] = 1
+    payload["min_tokens"] = 1
+    if "max_completion_tokens" in payload:
+        payload["max_completion_tokens"] = 1
+    payload.pop("stream_options", None)
+    return payload
+
+
 async def pd_route(api_path: str, req_data: dict, request: Request) -> StreamingResponse:
     """Two-stage PD routing: prefill P → decode D."""
     request_id = f"pd-{uuid.uuid4().hex[:12]}"
     t0 = time.perf_counter()
     stream_flag = bool(req_data.get("stream", False))
 
-    # ── Stage 1: Prefill on P ──
+    # ── Stage 1: Prefill on P (inject kv_transfer_params, max_tokens=1) ──
     prefill_url = f"{args.prefill_url}{api_path}"
+    prefill_payload = _build_prefill_payload(req_data)
     prompt_len = len(req_data.get("prompt", ""))
-    logger.info(f"[{request_id}] Stage1 → P prefill ({prompt_len} chars)")
+    logger.info(f"[{request_id}] Stage1 → P prefill ({prompt_len} chars, "
+                f"max_tokens=1, do_remote_decode=True)")
 
     prefill_resp = await client.post(
-        prefill_url, json=req_data,
+        prefill_url, json=prefill_payload,
         timeout=httpx.Timeout(args.timeout),
     )
     prefill_resp.raise_for_status()
@@ -90,15 +126,18 @@ async def pd_route(api_path: str, req_data: dict, request: Request) -> Streaming
 
     kv_params = prefill_body.get("kv_transfer_params")
     if kv_params:
-        logger.info(f"[{request_id}] Got kv_transfer_params: "
-                    f"{json.dumps(kv_params, default=str)[:200]}")
+        logger.info(f"[{request_id}] ✓ Got kv_transfer_params: "
+                    f"{json.dumps(kv_params, default=str)[:300]}")
         req_data["kv_transfer_params"] = kv_params
     else:
-        logger.info(f"[{request_id}] P returned null kv_transfer_params")
+        logger.warning(f"[{request_id}] ✗ P returned null kv_transfer_params "
+                       f"— KV transfer will NOT happen. Check P config.")
 
-    # ── Stage 2: Decode on D ──
+    # ── Stage 2: Decode on D (original max_tokens + kv_transfer_params) ──
     decode_url = f"{args.decode_url}{api_path}"
-    logger.info(f"[{request_id}] Stage2 → D decode")
+    logger.info(f"[{request_id}] Stage2 → D decode "
+                f"(kv={'yes' if kv_params else 'no'}, "
+                f"max_tokens={req_data.get('max_tokens','?')})")
 
     decode_req = client.build_request(
         "POST", decode_url, json=req_data,
