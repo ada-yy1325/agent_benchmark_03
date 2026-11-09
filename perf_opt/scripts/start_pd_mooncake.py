@@ -25,7 +25,17 @@ TMP = "/tmp/pd_test"
 # These were reconstructed from the engine binary's getenv strings (11-06).
 MC_ENV = {
     # ── TCP / Networking (loopback-only, no RDMA/IB/EFA) ──
-    "MC_FORCE_TCP": "1",
+    # CRITICAL: Do NOT set MC_FORCE_TCP. C getenv() checks EXISTENCE
+    # (non-NULL pointer), not value. Setting it to any value, including "0",
+    # short-circuits engine initialize() at line 240 BEFORE Ascend Direct
+    # transport is installed. Ascend Direct is required for NPU device
+    # memory — plain TCP write() cannot touch NPU buffer addresses.
+    #
+    # Previous "MC_FORCE_TCP": "1" was the root cause of:
+    #   - P: ServerSession::writeBody failed: Bad address (errno 14)
+    #   - D: batchTransferSync: all retries exhausted
+    # Because TCP transport tried to write(NPU_device_ptr) which is invalid.
+    # "MC_FORCE_TCP": "1",  ← REMOVED, DO NOT RESTORE
     "MC_TCP_ENABLE_CONNECTION_POOL": "0",
     "MC_TCP_PROTO": "tcp",
     "MC_TCP_BIND_ADDRESS": "127.0.0.1",
