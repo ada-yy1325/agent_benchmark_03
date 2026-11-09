@@ -25,10 +25,11 @@ TMP = "/tmp/pd_test"
 # These were reconstructed from the engine binary's getenv strings (11-06).
 MC_ENV = {
     # ── TCP / Networking (loopback-only, no RDMA/IB/EFA) ──
-    # MC_FORCE_TCP=1: Route B. Ascend Direct transport failed because
-    # HcclRegisterGlobalMem rejects torch_npu KV cache buffers (103900
-    # even on first worker). TCP mode + connector patches (untyped_storage
-    # dedup + data-length split) was verified working on 2026-11-02.
+    # MC_FORCE_TCP=1 + mooncake_protocol="tcp": Force TCP transport.
+    # Ascend Direct (protocol="ascend") fails because HcclRegisterGlobalMem
+    # rejects torch_npu KV cache buffers (103900 for ALL workers).
+    # Protocol "tcp" triggers posix_memalign allocator in engine
+    # + connector patches handle NPU memory safely.
     "MC_FORCE_TCP": "1",
     "MC_TCP_ENABLE_CONNECTION_POOL": "0",
     "MC_TCP_PROTO": "tcp",
@@ -142,7 +143,7 @@ ADDITIONAL_CONFIG = json.dumps({
 # ── Common kv_connector_extra_config ───────────────────────────────────────
 # DeepSeek V4 on Ascend: tp=8, dp=1 (8 NPUs per role)
 KV_EXTRA = {
-    "mooncake_protocol": "ascend",
+    "mooncake_protocol": "tcp",
     "prefill": {"dp_size": 1, "tp_size": 8},
     "decode":  {"dp_size": 1, "tp_size": 8},
 }
