@@ -78,11 +78,12 @@ async def shutdown():
 # Two-stage routing
 # ---------------------------------------------------------------------------
 
-def _build_prefill_payload(original: dict) -> dict:
+def _build_prefill_payload(original: dict, request_id: str) -> dict:
     """Build payload for prefill-only request to P.
 
     Per official vLLM Mooncake PD protocol:
     - kv_transfer_params tells P: "do remote decode, save KV to Mooncake transport"
+    - transfer_id is REQUIRED — connector skips _reqs_need_send without it (line 648)
     - max_tokens=1: P only outputs 1 token (stop token), saving full KV cache
     - stream=False: prefill stage is not streaming
     """
@@ -90,6 +91,7 @@ def _build_prefill_payload(original: dict) -> dict:
     payload["kv_transfer_params"] = {
         "do_remote_decode": True,
         "do_remote_prefill": False,
+        "transfer_id": request_id,
         "remote_engine_id": None,
         "remote_block_ids": None,
         "remote_host": None,
@@ -112,10 +114,10 @@ async def pd_route(api_path: str, req_data: dict, request: Request) -> Streaming
 
     # ── Stage 1: Prefill on P (inject kv_transfer_params, max_tokens=1) ──
     prefill_url = f"{args.prefill_url}{api_path}"
-    prefill_payload = _build_prefill_payload(req_data)
+    prefill_payload = _build_prefill_payload(req_data, request_id)
     prompt_len = len(req_data.get("prompt", ""))
     logger.info(f"[{request_id}] Stage1 → P prefill ({prompt_len} chars, "
-                f"max_tokens=1, do_remote_decode=True)")
+                f"max_tokens=1, do_remote_decode=True, transfer_id={request_id})")
 
     prefill_resp = await client.post(
         prefill_url, json=prefill_payload,
@@ -126,12 +128,21 @@ async def pd_route(api_path: str, req_data: dict, request: Request) -> Streaming
 
     kv_params = prefill_body.get("kv_transfer_params")
     if kv_params:
-        logger.info(f"[{request_id}] ✓ Got kv_transfer_params: "
+        logger.info(f"[{request_id}] ✓ Got kv_transfer_params from P: "
                     f"{json.dumps(kv_params, default=str)[:300]}")
-        req_data["kv_transfer_params"] = kv_params
+        # Construct D-side kv_transfer_params: do_remote_prefill + transfer_id + engine info
+        req_data["kv_transfer_params"] = {
+            "do_remote_prefill": True,
+            "do_remote_decode": False,
+            "transfer_id": request_id,
+            "remote_engine_id": kv_params.get("remote_engine_id"),
+            "remote_block_ids": kv_params.get("remote_block_ids"),
+            "remote_host": kv_params.get("remote_host"),
+            "remote_port": kv_params.get("remote_port"),
+        }
     else:
         logger.warning(f"[{request_id}] ✗ P returned null kv_transfer_params "
-                       f"— KV transfer will NOT happen. Check P config.")
+                       f"— KV transfer will NOT happen. Check P bootstrap (8998).")
 
     # ── Stage 2: Decode on D (original max_tokens + kv_transfer_params) ──
     decode_url = f"{args.decode_url}{api_path}"
