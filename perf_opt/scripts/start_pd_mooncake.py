@@ -25,17 +25,16 @@ TMP = "/tmp/pd_test"
 # These were reconstructed from the engine binary's getenv strings (11-06).
 MC_ENV = {
     # ── TCP / Networking (loopback-only, no RDMA/IB/EFA) ──
-    # CRITICAL: Do NOT set MC_FORCE_TCP. C getenv() checks EXISTENCE
-    # (non-NULL pointer), not value. Setting it to any value, including "0",
-    # short-circuits engine initialize() at line 240 BEFORE Ascend Direct
-    # transport is installed. Ascend Direct is required for NPU device
-    # memory — plain TCP write() cannot touch NPU buffer addresses.
+    # NOTE: MC_FORCE_TCP=1 causes Ascend Direct transport to be SKIPPED
+    # (see transfer_engine_impl.cpp:240). In TCP mode, the engine uses
+    # posix_memalign for memory allocation and handles NPU memory via
+    # the 11-02 connector patches (untyped_storage dedup + data-length split).
+    # This was verified working on 2026-11-02 (D prompt throughput=0.0).
     #
-    # Previous "MC_FORCE_TCP": "1" was the root cause of:
-    #   - P: ServerSession::writeBody failed: Bad address (errno 14)
-    #   - D: batchTransferSync: all retries exhausted
-    # Because TCP transport tried to write(NPU_device_ptr) which is invalid.
-    # "MC_FORCE_TCP": "1",  ← REMOVED, DO NOT RESTORE
+    # Without MC_FORCE_TCP, engine installs Ascend Direct transport which
+    # requires per-worker HCCL memory registration → fails with error 103900
+    # (HcclRegisterGlobalMem overlap) in multi-process TP=8 setup.
+    "MC_FORCE_TCP": "1",
     "MC_TCP_ENABLE_CONNECTION_POOL": "0",
     "MC_TCP_PROTO": "tcp",
     "MC_TCP_BIND_ADDRESS": "127.0.0.1",
