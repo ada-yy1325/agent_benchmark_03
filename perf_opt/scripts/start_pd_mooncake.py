@@ -138,6 +138,7 @@ ADDITIONAL_CONFIG = json.dumps({
 # ── Common kv_connector_extra_config ───────────────────────────────────────
 # DeepSeek V4 on Ascend: tp=8, dp=1 (8 NPUs per role)
 KV_EXTRA = {
+    "mooncake_protocol": "ascend",
     "prefill": {"dp_size": 1, "tp_size": 8},
     "decode":  {"dp_size": 1, "tp_size": 8},
 }
