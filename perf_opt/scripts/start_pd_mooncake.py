@@ -25,16 +25,10 @@ TMP = "/tmp/pd_test"
 # These were reconstructed from the engine binary's getenv strings (11-06).
 MC_ENV = {
     # ── TCP / Networking (loopback-only, no RDMA/IB/EFA) ──
-    # NOTE: MC_FORCE_TCP=1 causes Ascend Direct transport to be SKIPPED
-    # (see transfer_engine_impl.cpp:240). In TCP mode, the engine uses
-    # posix_memalign for memory allocation and handles NPU memory via
-    # the 11-02 connector patches (untyped_storage dedup + data-length split).
-    # This was verified working on 2026-11-02 (D prompt throughput=0.0).
-    #
-    # Without MC_FORCE_TCP, engine installs Ascend Direct transport which
-    # requires per-worker HCCL memory registration → fails with error 103900
-    # (HcclRegisterGlobalMem overlap) in multi-process TP=8 setup.
-    "MC_FORCE_TCP": "1",
+    # MC_FORCE_TCP deliberately UNSET. Ascend Direct transport is required
+    # for NPU device memory handling. Error 103900 (HcclRegisterGlobalMem
+    # overlap in multi-process TP=8) is tolerated by
+    # patch_adxl_103900.py in ascend_direct_transport.cpp.
     "MC_TCP_ENABLE_CONNECTION_POOL": "0",
     "MC_TCP_PROTO": "tcp",
     "MC_TCP_BIND_ADDRESS": "127.0.0.1",
