@@ -26,26 +26,31 @@ sleep 3
 echo "[3/4] Regenerating MTP launch scripts..."
 python3 perf_opt/scripts/regenerate_pd_mtp.py
 
-# 4. Start Decode first (wait for it), then Prefill
+# 4. Start Decode first via tmux, then Prefill
 echo "[4/4] Starting Decode → Prefill (MTP ON)..."
-bash "${TMP}/_pd_decode_mtp_launch.sh" &
-DECODE_PID=$!
-echo "   Decode PID=$DECODE_PID"
+tmux kill-server 2>/dev/null; sleep 1
+
+# Launch decode in tmux
+tmux new-session -d -s pd_decode bash
+sleep 0.5
+tmux send-keys -t pd_decode "bash ${TMP}/_pd_decode_mtp_launch.sh" Enter
+echo "   Decode tmux 'pd_decode' started (devices=8,9,10,11,12,13,14,15)"
 
 # Wait for decode healthy
 echo "   Waiting for decode :8001..."
 for i in $(seq 1 180); do
   if curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8001/health 2>/dev/null | grep -q 200; then
-    echo "   ✅ Decode healthy after ${i}0s"
+    echo "   ✅ Decode healthy after ~${i}0s"
     break
   fi
   sleep 10
 done
 
-# Start Prefill
-bash "${TMP}/_pd_prefill_mtp_launch.sh" &
-PREFILL_PID=$!
-echo "   Prefill PID=$PREFILL_PID"
+# Launch prefill in tmux
+tmux new-session -d -s pd_prefill bash
+sleep 0.5
+tmux send-keys -t pd_prefill "bash ${TMP}/_pd_prefill_mtp_launch.sh" Enter
+echo "   Prefill tmux 'pd_prefill' started (devices=0,1,2,3,4,5,6,7)"
 
 # Wait for prefill healthy
 echo "   Waiting for prefill :8000..."
