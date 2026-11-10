@@ -187,30 +187,16 @@ def build_args(prefill: bool, port: int, mtp: bool = False) -> list:
         "--quantization", "ascend",
         "--block-size", "128",
     ]
+    # MTP speculative decoding (enforce_eager avoids torch.compile issues)
     if mtp:
         args.extend([
             "--speculative-config",
             '{"method":"mtp","num_speculative_tokens":1,"enforce_eager":true}',
         ])
-    # MTP + npugraph_ex causes compilation AssertionError at load time
-    # -> disable npugraph_ex (static_kernel also requires npugraph_ex)
-    if mtp:
-        mtp_add_config = json.dumps({
-            "ascend_compilation_config": {
-                "enable_npugraph_ex": False,
-                "enable_static_kernel": False,
-            },
-            "enable_cpu_binding": True,
-            "enable_dsa_cp": True,
-            "multistream_overlap_shared_expert": True,
-        }, separators=(",", ":"))
-        args.extend(["--additional-config", mtp_add_config])
-    else:
-        args.append("--additional-config")
-        args.append(ADDITIONAL_CONFIG)
     args.extend([
         "--compilation-config", '{"cudagraph_mode":"FULL_DECODE_ONLY"}',
         "--kv-transfer-config", build_kv_config(role, rank),
+        "--additional-config", ADDITIONAL_CONFIG,
         "--tokenizer-mode", "deepseek_v4",
         "--tool-call-parser", "deepseek_v4",
         "--enable-auto-tool-choice",
