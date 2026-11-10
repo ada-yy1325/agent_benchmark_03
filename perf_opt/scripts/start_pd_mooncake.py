@@ -190,7 +190,7 @@ def build_args(prefill: bool, port: int, mtp: bool = False) -> list:
     if mtp:
         args.extend([
             "--speculative-config",
-            '{"method":"mtp","num_speculative_tokens":1}',
+            '{"method":"mtp","num_speculative_tokens":1,"enforce_eager":true}',
         ])
     # MTP + npugraph_ex causes compilation AssertionError at load time
     # -> disable npugraph_ex (static_kernel also requires npugraph_ex)
