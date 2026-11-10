@@ -36,9 +36,9 @@ def run(input_len, output_len, concurrency, case_id, npu_csv):
 
 
 if __name__ == "__main__":
-    # MTP 4K/1K c=4,8,16
-    for c in [4, 8, 16]:
-        if not run(4096, 1024, c, f"pd_mtp_4k1k_c{c}", f"npu_mtp_4k1k_c{c}.csv"):
-            print(f"FAIL at MTP 4K/1K c={c}")
+    # No-MTP 4K/1K c=1,4,8,16
+    for c in [1, 4, 8, 16]:
+        if not run(4096, 1024, c, f"pd_nomtp_4k1k_c{c}", f"npu_nomtp_4k1k_c{c}.csv"):
+            print(f"FAIL at NoMTP 4K/1K c={c}")
             sys.exit(1)
-    print("ALL DONE")
+    print("ALL NoMTP 4K/1K DONE")
