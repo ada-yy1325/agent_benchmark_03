@@ -9,7 +9,7 @@ TMP = "/tmp/pd_test"
 os.makedirs(TMP, exist_ok=True)
 
 # Generate args with MTP=True for both P and D
-for pf, port, lb in [(True, 8000, "pd_prefill"), (False, 8001, "pd_decode")]:
+for pf, port, lb in [(True, 8000, "prefill"), (False, 8001, "decode")]:
     a = build_args(prefill=pf, port=port, mtp=True)
     out = f"{TMP}/pd_{lb}_mtp_args.json"
     with open(out, "w") as f:

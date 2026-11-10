@@ -8,7 +8,7 @@ from perf_opt.scripts.start_pd_mooncake import build_args, generate_shell_script
 TMP = "/tmp/pd_test"
 os.makedirs(TMP, exist_ok=True)
 
-for pf, port, lb in [(True, 8000, "pd_prefill"), (False, 8001, "pd_decode")]:
+for pf, port, lb in [(True, 8000, "prefill"), (False, 8001, "decode")]:
     a = build_args(prefill=pf, port=port)
     with open(f"{TMP}/pd_{lb}_args.json", "w") as f:
         json.dump(a, f)
