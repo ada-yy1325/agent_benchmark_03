@@ -68,22 +68,25 @@ def send_test_request(port: int) -> dict | None:
 
 def check_pd_log(logfile: str) -> bool:
     """Verify decode log shows prompt throughput ≈ 0."""
-    if not os.path.exists(logfile):
-        print(f"  ⚠️  Log file not found: {logfile}")
-        return False
-    # Look for "prompt throughput: 0.0" or very low prompt throughput
-    prompt_zero = False
-    with open(logfile) as f:
-        for line in f:
-            if "prompt throughput" in line:
-                if "0.0 tokens/s" in line or "0.0 tokens/s" in line:
-                    prompt_zero = True
-    if prompt_zero:
-        print("  ✅ PD verified: decode prompt throughput ≈ 0 (KV from transfer)")
-        return True
-    else:
-        print("  ⚠️  Could not confirm PD in logs (check manually)")
-        return False
+    # If specific logfile not found, search all decode logs in TMP
+    import glob as _g
+    candidates = [logfile] + sorted(_g.glob(f"{TMP}/decode*.log"))
+    found = False
+    for log in candidates:
+        if not os.path.exists(log):
+            continue
+        with open(log) as f:
+            for line in f:
+                if "prompt throughput" in line:
+                    if "0.0 tokens/s" in line:
+                        print(f"  ✅ PD verified: {log} → prompt throughput=0.0 (KV from transfer)")
+                        return True
+                    else:
+                        print(f"  ⚠️  {log}: prompt throughput NON-ZERO → D may be doing local prefill!")
+                        found = False
+    if not found:
+        print(f"  ⚠️  No prompt throughput lines found in decode logs under {TMP}")
+    return False
 
 
 def main():
