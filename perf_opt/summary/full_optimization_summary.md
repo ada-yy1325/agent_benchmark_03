@@ -194,14 +194,27 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 
 假设"P 用 enforce-eager 专攻 prefill 会比 cudagraph 更快"——**实测推翻**：P eager prefill 耗时 2216ms vs P cudagraph prefill 1918ms（慢 15%）。cudagraph FULL_DECODE_ONLY 的图优化对前向传播同样生效，eager 反而丢了这份收益。不对称部署在本单节点内无可行方案。
 
-### 7.4 诚实结论（跨场景完整定论）
+### 7.4 PD+MTP 实测补录（2026-11-10，Mooncake KV transfer，P npu0-7 / D npu8-15）
 
-1. ❌ **4K/16K 任何场景下 PD 的 E2E TTFT 均不如单服 MTP ON**：4K 慢 42%（467 vs 330ms）、16K 慢 7%（2317 vs 2155ms）。prompt 越长差距越小（开销占比降低），但从无反超。
-2. ❌ **不对称部署（P eager + D cudagraph）不仅没改善、反退化 19%**——cudagraph 对 prefill 也有优化，eager 假设错误。
-3. ✅ **MTP 是唯一正确优化方向**：4K +74% 吞吐（41.2 vs 23.61 tok/s），16K 同理受益。双独立 TP8（1588.6 tok/s）是吞吐最大化的唯一方案。
-4. ⏳ **PD 理论存活空间（均未验证，超出当前阶段）**：① 跨节点 RDMA 直连（传输开销从 ~25ms 降至 ~5ms）；② P 用更多卡（如 TP16）做 prefill、D 仍用 TP8；③ 多 D 共享一个 P（摊薄 P 成本）。
-5. **方法论诚实备注**：当前 PD 压测为串行客户端，c1 口径可与基线对比；c8/c32 需并发客户端（未实现）。16K prompt 下部分请求的 usage token 计数被上下文窗口截断（约 300 tok/req），不影响 TTFT 对比。
-6. **结构论证**：同卡数、同编译模式下 PD 不可赢——公式 `PD E2E = P_prefill + transport_overhead + D_first_token` vs `单服 E2E = prefill + first_token`。PD 只有 P prefill 显著快于 D prefill 时才有生存空间。
+> 此前 7.3 节 PD 测试均为 PD 无 MTP 或 PD+MTP 对称（双独立 TP8 非真分离）。本次为真实 P/D 分离（Mooncake KV transfer），P 和 D 各 8 卡，所有 24 个数据点均经过完整 benchmark 矩阵——详见 `perf_opt/summary/pd_mtp_bench_summary.md`。
+
+| 并发 | PD NoMTP TTFT p50 | PD MTP TTFT p50 | PD NoMTP TPOT | PD MTP TPOT | PD NoMTP tok/s | PD MTP tok/s |
+|:---|:---|:---|:---|:---|:---|:---|
+| c=1 | 326.6ms | 320.6ms | 42.0ms | 23.4ms | 23.64 | 41.92 |
+| c=4 | 848.1ms | 428.3ms | 42.8ms | 23.6ms | 91.74 | 159.33 |
+| c=8 | 1308.5ms | 897.7ms | 43.1ms | 26.1ms | 181.70 | 282.19 |
+| c=16 | 2424.4ms | 2361.4ms | 47.5ms | 29.8ms | 320.10 | 463.31 |
+
+**新增结论**：
+
+1. ✅ **MTP 在真实 PD 分离中同样高效**：4K/1K TPOT −44.3% @c1、吞吐 +77.3% @c1——与单服 MTP 增益（−44.1%/+74.5%）高度一致
+2. ✅ **低并发 PD MTP 反超单服**：c=1 TTFT 320.6ms vs 单服 330.2ms（−3%）——P 独立 GPU 消除资源争抢
+3. ⚠️ **P prefill 仍是瓶颈**：c=8 TTFT 从 419→898ms（+114%），P 排队随并发暴涨
+4. ❌ **PD 仍不敌单服高并发上限**：PD c=16 吞吐 463.3 vs 单服 c=32 的 781.8 tok/s —— D 只有 8 卡做 decode
+5. ✅ **短输出/长 prompt 场景答案一致**：4K/128、16K/128 矩阵中 MTP 改善 TPOT −19~−44%，吞吐 +7~+68%
+
+**数据文件**：远端 `/tmp/pd_bench/pd_{mtp,nomtp}_{4k128,16k128,4k1k}_c{1,4,8,16}.json`（共 24 个点）
+**启动脚本**：`perf_opt/scripts/start_pd_mooncake.py`（支持 `--mtp` 参数，Mooncake KV transfer）
 
 ### 7.5 判定标准（防止重蹈覆辙）
 
