@@ -167,7 +167,7 @@ def build_kv_config(role: str, rank: int) -> str:
     return json.dumps(cfg, separators=(",", ":"))
 
 
-def build_args(prefill: bool, port: int) -> list:
+def build_args(prefill: bool, port: int, mtp: bool = False) -> list:
     """Build CLI args for vllm serve."""
     role = "kv_producer" if prefill else "kv_consumer"
     rank = 0 if prefill else 1
@@ -186,6 +186,13 @@ def build_args(prefill: bool, port: int) -> list:
         "--enable-expert-parallel",
         "--quantization", "ascend",
         "--block-size", "128",
+    ]
+    if mtp:
+        args.extend([
+            "--speculative-config",
+            '{"method":"mtp","num_speculative_tokens":1}',
+        ])
+    args.extend([
         "--compilation-config", '{"cudagraph_mode":"FULL_DECODE_ONLY"}',
         "--kv-transfer-config", build_kv_config(role, rank),
         "--additional-config", ADDITIONAL_CONFIG,
@@ -193,7 +200,7 @@ def build_args(prefill: bool, port: int) -> list:
         "--tool-call-parser", "deepseek_v4",
         "--enable-auto-tool-choice",
         "--reasoning-parser", "deepseek_v4",
-    ]
+    ])
     return args
 
 
