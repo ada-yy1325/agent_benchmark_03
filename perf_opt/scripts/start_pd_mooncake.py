@@ -30,7 +30,7 @@ MC_ENV = {
     # rejects torch_npu KV cache buffers (103900 for ALL workers).
     # Protocol "tcp" triggers posix_memalign allocator in engine
     # + connector patches handle NPU memory safely.
-    "MC_FORCE_TCP": "1",
+    "MC_FORCE_TCP": "0",
     "MC_TCP_ENABLE_CONNECTION_POOL": "0",
     "MC_TCP_PROTO": "tcp",
     "MC_TCP_BIND_ADDRESS": "127.0.0.1",
@@ -143,7 +143,7 @@ ADDITIONAL_CONFIG = json.dumps({
 # ── Common kv_connector_extra_config ───────────────────────────────────────
 # DeepSeek V4 on Ascend: tp=8, dp=1 (8 NPUs per role)
 KV_EXTRA = {
-    "mooncake_protocol": "tcp",
+    "mooncake_protocol": "ascend",
     "prefill": {"dp_size": 1, "tp_size": 8},
     "decode":  {"dp_size": 1, "tp_size": 8},
 }
