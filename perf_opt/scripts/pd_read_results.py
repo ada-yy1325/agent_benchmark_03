@@ -1,14 +1,25 @@
 import json, glob, sys
 
-files = sorted(glob.glob("/tmp/pd_bench/*.json"))
-print(f"Found {len(files)} result files")
+PATTERNS = [
+    "/tmp/pd_bench/pd_mtp_4k1k_c*.json",
+    "/tmp/pd_bench/pd_mtp_4k128_c*.json",
+    "/tmp/pd_bench/pd_mtp_16k128_c*.json",
+    "/tmp/pd_bench/pd_nomtp_4k128_c*.json",
+    "/tmp/pd_bench/pd_nomtp_16k128_c*.json",
+    "/tmp/pd_bench/pd_nomtp_4k1k_c*.json",
+]
+all_files = []
+for pat in PATTERNS:
+    all_files.extend(glob.glob(pat))
+all_files = sorted(set(all_files))
+
+print(f"Found {len(all_files)} result files")
 print(f"{'case_id':<40} {'ok':>4} {'TTFT p50':>9} {'TTFT p99':>9} {'TPOT p50':>9} {'tok/s':>8}")
 print("-" * 85)
-for f in files:
+for f in all_files:
     d = json.load(open(f))
     cid = d.get("case_id", "?")
     succ = d.get("successful_requests", "?")
-    plan = d.get("planned_requests", "?")
     ttft = d.get("ttft_ms", {})
     tpot = d.get("tpot_ms", {})
     tp = d.get("output_tokens_per_s", "?")
