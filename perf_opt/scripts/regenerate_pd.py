@@ -2,7 +2,7 @@
 """Regenerate PD launch scripts from start_pd_mooncake.py build_args()."""
 import json, os, sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from perf_opt.scripts.start_pd_mooncake import build_args, generate_shell_script
 
 TMP = "/tmp/pd_test"
