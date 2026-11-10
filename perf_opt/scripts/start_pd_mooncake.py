@@ -192,10 +192,25 @@ def build_args(prefill: bool, port: int, mtp: bool = False) -> list:
             "--speculative-config",
             '{"method":"mtp","num_speculative_tokens":1}',
         ])
+    # MTP + npugraph_ex causes compilation AssertionError at load time
+    # -> disable npugraph_ex and use static_kernel instead
+    if mtp:
+        mtp_add_config = json.dumps({
+            "ascend_compilation_config": {
+                "enable_npugraph_ex": False,
+                "enable_static_kernel": True,
+            },
+            "enable_cpu_binding": True,
+            "enable_dsa_cp": True,
+            "multistream_overlap_shared_expert": True,
+        }, separators=(",", ":"))
+        args.extend(["--additional-config", mtp_add_config])
+    else:
+        args.append("--additional-config")
+        args.append(ADDITIONAL_CONFIG)
     args.extend([
         "--compilation-config", '{"cudagraph_mode":"FULL_DECODE_ONLY"}',
         "--kv-transfer-config", build_kv_config(role, rank),
-        "--additional-config", ADDITIONAL_CONFIG,
         "--tokenizer-mode", "deepseek_v4",
         "--tool-call-parser", "deepseek_v4",
         "--enable-auto-tool-choice",
