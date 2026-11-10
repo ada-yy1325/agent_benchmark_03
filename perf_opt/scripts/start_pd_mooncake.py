@@ -255,10 +255,12 @@ def serve_mode():
 # ═══════════════════════════════════════════════════════════════════════════
 # Orchestrator mode (--serial)
 # ═══════════════════════════════════════════════════════════════════════════
-def orchestrator_mode():
+def orchestrator_mode(mtp=False):
     """Kill previous, generate scripts, start decode then prefill via tmux."""
+    suffix = "_mtp" if mtp else "_v2"
+    tag = "MTP ON" if mtp else "v2"
     print("=" * 60)
-    print("PD Separation v2: Prefill(0-7) + Decode(8-15)")
+    print(f"PD Separation {tag}: Prefill(0-7) + Decode(8-15)")
     print("Mode: SERIAL (decode first, then prefill)")
     print("=" * 60)
 
@@ -268,12 +270,12 @@ def orchestrator_mode():
     os.makedirs(TMP, exist_ok=True)
 
     # Build args
-    decode_args = build_args(prefill=False, port=8001)
-    prefill_args = build_args(prefill=True, port=8000)
+    decode_args = build_args(prefill=False, port=8001, mtp=mtp)
+    prefill_args = build_args(prefill=True, port=8000, mtp=mtp)
 
     # Write arg files
-    decode_args_file = f"{TMP}/pd_decode_args.json"
-    prefill_args_file = f"{TMP}/pd_prefill_args.json"
+    decode_args_file = f"{TMP}/pd_decode{suffix.replace('v2','')}args.json"
+    prefill_args_file = f"{TMP}/pd_prefill{suffix.replace('v2','')}args.json"
     with open(decode_args_file, "w") as f:
         json.dump(decode_args, f)
     with open(prefill_args_file, "w") as f:
@@ -282,14 +284,14 @@ def orchestrator_mode():
     # Generate shell scripts
     decode_script = generate_shell_script(
         "pd_decode", "8,9,10,11,12,13,14,15",
-        decode_args_file, f"{TMP}/decode_v2.log",
+        decode_args_file, f"{TMP}/decode{suffix}.log",
     )
     prefill_script = generate_shell_script(
         "pd_prefill", "0,1,2,3,4,5,6,7",
-        prefill_args_file, f"{TMP}/prefill_v2.log",
+        prefill_args_file, f"{TMP}/prefill{suffix}.log",
     )
-    decode_sh = f"{TMP}/_pd_decode_launch.sh"
-    prefill_sh = f"{TMP}/_pd_prefill_launch.sh"
+    decode_sh = f"{TMP}/_pd_decode_launch{suffix.replace('v2','')}.sh"
+    prefill_sh = f"{TMP}/_pd_prefill_launch{suffix.replace('v2','')}.sh"
     for path, content in [(decode_sh, decode_script), (prefill_sh, prefill_script)]:
         with open(path, "w") as f:
             f.write(content)
@@ -350,14 +352,17 @@ def main():
     parser = argparse.ArgumentParser(description="PD Mooncake launcher")
     parser.add_argument("--serial", action="store_true",
                         help="Orchestrator: start decode then prefill via tmux")
+    parser.add_argument("--mtp", action="store_true",
+                        help="Enable MTP speculative decoding (num_speculative_tokens=1)")
     ns = parser.parse_args()
 
     if os.environ.get("_PD_ARGS_FILE"):
         serve_mode()
     elif ns.serial:
-        orchestrator_mode()
+        orchestrator_mode(mtp=ns.mtp)
     else:
         print("Usage: --serial (orchestrator) or set _PD_ARGS_FILE (serve mode)")
+        print("  --serial --mtp  (orchestrator with MTP speculative decoding)")
         sys.exit(1)
 
 
