@@ -193,12 +193,12 @@ def build_args(prefill: bool, port: int, mtp: bool = False) -> list:
             '{"method":"mtp","num_speculative_tokens":1}',
         ])
     # MTP + npugraph_ex causes compilation AssertionError at load time
-    # -> disable npugraph_ex and use static_kernel instead
+    # -> disable npugraph_ex (static_kernel also requires npugraph_ex)
     if mtp:
         mtp_add_config = json.dumps({
             "ascend_compilation_config": {
                 "enable_npugraph_ex": False,
-                "enable_static_kernel": True,
+                "enable_static_kernel": False,
             },
             "enable_cpu_binding": True,
             "enable_dsa_cp": True,
