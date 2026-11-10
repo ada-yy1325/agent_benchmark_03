@@ -19,12 +19,12 @@ for pf, port, lb in [(True, 8000, "pd_prefill"), (False, 8001, "pd_decode")]:
 # Generate full launch scripts with all env vars
 for role, devs, log, af in [
     ("pd_decode", "8,9,10,11,12,13,14,15", "decode_mtp.log",
-     f"{TMP}/pd_pd_decode_mtp_args.json"),
+     f"{TMP}/pd_decode_mtp_args.json"),
     ("pd_prefill", "0,1,2,3,4,5,6,7", "prefill_mtp.log",
-     f"{TMP}/pd_pd_prefill_mtp_args.json"),
+     f"{TMP}/pd_prefill_mtp_args.json"),
 ]:
     s = generate_shell_script(role, devs, af, f"{TMP}/{log}")
-    out = f"{TMP}_{role}_mtp_launch.sh"
+    out = f"{TMP}/_{role}_mtp_launch.sh"
     with open(out, "w") as f:
         f.write(s)
     os.chmod(out, 0o755)
