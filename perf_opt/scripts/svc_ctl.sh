@@ -34,14 +34,6 @@ gen_launch_script() {
   local mtp="$4"     # 0 or 1
   local logfile="$5"
 
-  local mtp_block=""
-  local spec_cfg='{"method":"mtp","num_speculative_tokens":1,"enforce_eager":true}'
-  if [ "$mtp" = "1" ]; then
-    mtp_block="--speculative-config '${spec_cfg}' \\"
-  fi
-
-  local add_cfg='{"ascend_compilation_config":{"enable_npugraph_ex":true,"enable_static_kernel":false},"enable_cpu_binding":true,"enable_dsa_cp":true,"multistream_overlap_shared_expert":true}'
-
   cat > "/tmp/_${name}_launch.sh" << LAUNCH_SCRIPT_EOF
 #!/bin/bash
 # Auto-generated launch script for ${name} (TP8, port ${port})
@@ -76,25 +68,13 @@ import torch_npu; print(f'[preflight] torch_npu device_count={torch_npu.npu.devi
 
 echo "=== vLLM serve launch ==="
 
-vllm serve "\${MODEL}" \\
-  --host 0.0.0.0 --port ${port} \\
-  --max-model-len 133120 \\
-  --max-num-batched-tokens 8192 \\
-  --served-model-name dsv4 \\
-  --gpu-memory-utilization 0.9 \\
-  --max-num-seqs 64 \\
-  --data-parallel-size 1 \\
-  --tensor-parallel-size 8 \\
-  --enable-expert-parallel \\
-  --quantization ascend \\
-  --block-size 128 \\
-  --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY"}' \\
-  --tokenizer-mode deepseek_v4 \\
-  --tool-call-parser deepseek_v4 \\
-  --enable-auto-tool-choice \\
-  --reasoning-parser deepseek_v4 \\
-  --additional-config '${add_cfg}' \\
-  ${mtp_block}
+python3 -u perf_opt/scripts/start_server_phase5.py \\
+  --port ${port} \\
+  --mtp ${mtp} \\
+  --cpu-binding true \\
+  --dsa-cp true \\
+  --multistream-overlap true \\
+  "\${MODEL}" \\
   2>&1 | tee ${logfile}
 LAUNCH_SCRIPT_EOF
   chmod +x "/tmp/_${name}_launch.sh"
