@@ -67,8 +67,11 @@ parser.add_argument("--kv-cache-dtype", type=str, default="auto")
 # ── Extra passthrough ──
 parser.add_argument("--extra-vllm-args", type=str, default="")
 
+# ── Positional: model path (from _serve_tp8_mtp.sh etc.) ──
+parser.add_argument("model_path", nargs="?", default=None)
+
 args_cmd = parser.parse_args()
-MODEL_DIR = "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-npu16"
+MODEL_DIR = args_cmd.model_path or "/inspire/sj-ssd3/project/project-public/s26068/agent_benchmark_test/models/DeepSeek-V4-Flash-w8a8-npu16"
 
 CLI_ARGS = [
     MODEL_DIR,
