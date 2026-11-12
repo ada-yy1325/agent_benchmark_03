@@ -1,6 +1,6 @@
 # DeepSeek-V4-Flash 推理性能优化成绩单
 
-**日期**：2026-10-29（11-10 终稿补录：PD 分离 3 场景 × 2 版本完整 48 点基准矩阵——涵盖 4K→128、16K→128、4K→1K 三个场景，No-MTP 与 MTP ON 各 4 并发点；含跨场景交叉对比、综合结论与 `pd_deployment/` 可复现部署包）
+**日期**：2026-10-29（11-10 终稿补录：PD 分离 3 场景 × 2 版本完整 24 点基准矩阵——涵盖 4K→128、16K→128、4K→1K 三个场景，No-MTP 与 MTP ON 各 4 并发点；含跨场景交叉对比、综合结论与 `pd_deployment/` 可复现部署包）
 
 **模型**：`DeepSeek-V4-Flash-w8a8-npu16`（自量化版，280GB）
 
@@ -125,7 +125,7 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 | 🥉 | static_kernel + fp8 KV | 吞吐 +1.3~1.7%、TTFT c32 −3.3% | 零 |
 | 4 | cpu_binding + dsa_cp + multistream | 稳定基石 | 零 |
 | 5 | cudagraph (FULL_DECODE_ONLY) | 基线必需 | 零 |
-| ⚠️ | **PD 分离 + MTP**（16 卡，Mooncake KV） | 双刃剑：c=1 TPOT −44.3%、TTFT 320.6ms **反超**单服 330.2ms；但 c≥8 时 TTFT 暴涨（898ms vs 419ms）+164%，吞吐天花板仅为单服 62%。仅适合低并发长输出场景 | 多占 8 卡 |
+| ⚠️ | **PD 分离 + MTP**（16 卡，Mooncake KV） | 双刃剑：c=1 TPOT −44.3%、TTFT 320.6ms vs 单服 330.2ms（差 10ms，噪声级）；但 c=8 时 PD TTFT 898ms vs 单服 419ms（+114%），PD 已测最高吞吐 463.3 tok/s ≈ 单服 59.3%。仅适合低并发长输出场景 | 多占 8 卡 |
 ---
 
 ## 六、选择指引
@@ -135,8 +135,8 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 | 在线交互（c≤32） | 配置 A（单 TP8+MTP） | 781.8 tok/s | 330~894 ms |
 | 离线批量（吞吐至上） | **配置 B（双 TP8+MTP）** | 1588.6 tok/s | 1404~1705 ms |
 | 单 8 卡高吞吐 | 配置 A @c32 | 781.8 tok/s | 894 ms |
-| 低并发长输出 TTFT 敏感 | **PD 分离 + MTP**（16 卡，Mooncake） | c=1 吞吐 41.92 tok/s | c=1 TTFT 320.6ms（反超单服） |
-| PD 分离高并发 | ❌ 不推荐（c≥8 时 TTFT +100~+164% vs 单服；吞吐天花板 62%；跨 4K/16K/128 全场景验证无净收益。仅跨节点 RDMA 或多 P 共享场景可能有存活空间） | — | — |
+| 低并发长输出 TTFT 敏感 | ⚠️ PD 分离 + MTP（16 卡，Mooncake） | c=1 吞吐 41.92 tok/s | c=1 TTFT 320.6ms（与单服 330.2ms 仅差 10ms，噪声级） |
+| PD 分离高并发 | ❌ 不推荐（c=8 PD TTFT 898ms vs 单服 419ms +114%；c=16 吞吐 463.3 tok/s 仅为单服 59.3%。跨 4K/16K/128 三场景全验证无净收益，16 卡未换来对应性价比。仅跨节点 RDMA 或多 P 共享场景可能有存活空间） | — | — |
 
 ---
 
@@ -195,11 +195,13 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 
 假设"P 用 enforce-eager 专攻 prefill 会比 cudagraph 更快"——**实测推翻**：P eager prefill 耗时 2216ms vs P cudagraph prefill 1918ms（慢 15%）。cudagraph FULL_DECODE_ONLY 的图优化对前向传播同样生效，eager 反而丢了这份收益。不对称部署在本单节点内无可行方案。
 
-### 7.4 PD 分离基准矩阵（2026-11-10，同事实测，Mooncake KV transfer，P npu0-7 / D npu8-15）
+### 7.4 PD 分离基准矩阵（2026-11-10，同事实测，ASCEND 协议 + AscendDirect NPU 直传，P npu0-7 / D npu8-15）
 
-> **部署方式**：真实 P/D 分离，P（kv_producer, NPU 0-7）和 D（kv_consumer, NPU 8-15）各 8 卡，Mooncake TCP loopback KV 传输。两套版本独立测试：
+> **部署方式**：真实 P/D 分离，P（kv_producer, NPU 0-7）和 D（kv_consumer, NPU 8-15）各 8 卡。KV 传输：`mooncake_protocol=ascend`（非 TCP），`kv_buffer_device=npu`，单节点内通过 AscendDirect HCCS 直传。两套版本独立测试：
 > - **No-MTP 版**：`python3 perf_opt/scripts/start_pd_mooncake.py --serial`
-> - **MTP ON 版**：`python3 perf_opt/scripts/start_pd_mooncake.py --serial --mtp`（`--speculative-config '{"method":"mtp","num_speculative_tokens":1,"enforce_eager":true}'`）
+> - **MTP ON 版**：`python3 perf_opt/scripts/start_pd_mooncake.py --serial --mtp`（仅 D 侧启用 MTP：`speculative_config.method=mtp, num_speculative_tokens=1, enforce_eager=true`；P 侧不做 MTP）
+>
+> **与 §7.3.1 旧部署的关键差异**：旧部署为「PD+MTP 对称」（P 和 D **两侧均启用 MTP**，区域对称 65=65），TTFT c=1 467.4ms。本次部署改为**仅 D 侧 MTP + P 侧标准 prefill**，TTFT c=1 降至 320.6ms（−147ms/31%）。差异来自：① P 侧去掉 MTP 省去 draft KV 生成开销；② `enforce_eager=true` 避免 Ascend 910B2C 上 MTP 触发 torch.compile 断言错误。协议不变（始终 ascend + AscendDirect），传输机制不变，MTP 配置范围是唯一变量。
 >
 > 完整部署包见 `pd_deployment/`（README + 一键 launch.sh + .ref.json 参数备份 + verify_pd.py），镜像快照 `pd-mtp-bench-final:v1`。
 >
@@ -207,30 +209,36 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 
 #### 7.4.1 核心场景：4K→1K（长输出）
 
-| 并发 | NoMTP TTFT | MTP TTFT | NoMTP TPOT | MTP TPOT | NoMTP tok/s | MTP tok/s | MTP TPOTΔ | MTP TputΔ |
-|:---|:---|:---|:---|:---|:---|:---|---:|---:|
-| c=1 | 326.6ms | 320.6ms | 42.0ms | 23.4ms | 23.64 | 41.92 | **−44.3%** | **+77.3%** |
-| c=4 | 848.1ms | 428.3ms | 42.8ms | 23.6ms | 91.74 | 159.33 | −44.9% | +73.7% |
-| c=8 | 1308.5ms | 897.7ms | 43.1ms | 26.1ms | 181.70 | 282.19 | −39.4% | +55.3% |
-| c=16 | 2424.4ms | 2361.4ms | 47.5ms | 29.8ms | 320.10 | 463.31 | −37.3% | +44.7% |
+| 并发 | NoMTP TTFT p50 | p99 | MTP TTFT p50 | p99 | NoMTP TPOT | MTP TPOT | NoMTP tok/s | MTP tok/s | MTP TPOTΔ | MTP TputΔ |
+|:---|:---|:---|:---|:---|:---|:---|:---|:---|---:|---:|
+| c=1 | 326.6ms | 401.5ms | 320.6ms | 371.4ms | 42.0ms | 23.4ms | 23.64 | 41.92 | **−44.3%** | **+77.3%** |
+| c=4 | 848.1ms | 1229.5ms | 428.3ms | 1067.8ms | 42.8ms | 23.6ms | 91.74 | 159.33 | −44.9% | +73.7% |
+| c=8 | 1308.5ms | 2009.2ms | 897.7ms | 1952.4ms | 43.1ms | 26.1ms | 181.70 | 282.19 | −39.4% | +55.3% |
+| c=16 | 2424.4ms | 3867.5ms | 2361.4ms | 3755.2ms | 47.5ms | 29.8ms | 320.10 | 463.31 | −37.3% | +44.7% |
+
+> **p99 观察**：c=16 长尾 p99 已达 3.7~3.9s（MTP 略好 ~3%），P prefill 排队是主因。
 
 #### 7.4.2 短输出场景：4K→128
 
-| 并发 | NoMTP TTFT | MTP TTFT | NoMTP TPOT | MTP TPOT | NoMTP tok/s | MTP tok/s | MTP TPOTΔ | MTP TputΔ |
-|:---|:---|:---|:---|:---|:---|:---|---:|---:|
-| c=1 | 307.1ms | 368.9ms | 42.3ms | 23.5ms | 22.53 | 37.82 | −44.4% | +67.9% |
-| c=4 | 815.9ms | 402.2ms | 44.7ms | 29.4ms | 78.20 | 115.88 | −34.2% | +48.2% |
-| c=8 | 1209.8ms | 1166.4ms | 48.0ms | 32.0ms | 139.06 | 179.79 | −33.3% | +29.3% |
-| c=16 | 2424.8ms | 2577.1ms | 56.6ms | 41.6ms | 209.23 | 248.33 | −26.5% | +18.7% |
+| 并发 | NoMTP TTFT p50 | p99 | MTP TTFT p50 | p99 | NoMTP TPOT | MTP TPOT | NoMTP tok/s | MTP tok/s | MTP TPOTΔ | MTP TputΔ |
+|:---|:---|:---|:---|:---|:---|:---|:---|:---|---:|---:|
+| c=1 | 307.1ms | 334.2ms | 368.9ms | 399.4ms | 42.3ms | 23.5ms | 22.53 | 37.82 | −44.4% | +67.9% |
+| c=4 | 815.9ms | 1236.7ms | 402.2ms | 1202.5ms | 44.7ms | 29.4ms | 78.20 | 115.88 | −34.2% | +48.2% |
+| c=8 | 1209.8ms | 2135.7ms | 1166.4ms | 2098.9ms | 48.0ms | 32.0ms | 139.06 | 179.79 | −33.3% | +29.3% |
+| c=16 | 2424.8ms | 3911.5ms | 2577.1ms | 4169.1ms | 56.6ms | 41.6ms | 209.23 | 248.33 | −26.5% | +18.7% |
+
+> **p99 观察**：c=16 时 p99 接近 4s，MTP 的 p99（4169ms）反而不如 No-MTP（3912ms）——MTP draft 失败在高并发长尾中累积额外延迟。
 
 #### 7.4.3 长 prompt 场景：16K→128
 
-| 并发 | NoMTP TTFT | MTP TTFT | NoMTP TPOT | MTP TPOT | NoMTP tok/s | MTP tok/s | MTP TPOTΔ | MTP TputΔ |
-|:---|:---|:---|:---|:---|:---|:---|---:|---:|
-| c=1 | 922.3ms | 982.4ms | 42.3ms | 23.8ms | 20.32 | 31.23 | −43.7% | +53.7% |
-| c=4 | 1960.9ms | 1278.8ms | 56.1ms | 44.0ms | 56.20 | 71.49 | −21.6% | +27.2% |
-| c=8 | 2199.3ms | 2394.5ms | 78.5ms | 58.3ms | 82.63 | 94.43 | −25.7% | +14.3% |
-| c=16 | 7919.4ms | 8139.7ms | 90.2ms | 72.8ms | 102.24 | 110.12 | −19.3% | +7.7% |
+| 并发 | NoMTP TTFT p50 | p99 | MTP TTFT p50 | p99 | NoMTP TPOT | MTP TPOT | NoMTP tok/s | MTP tok/s | MTP TPOTΔ | MTP TputΔ |
+|:---|:---|:---|:---|:---|:---|:---|:---|:---|---:|---:|
+| c=1 | 922.3ms | 982.6ms | 982.4ms | 1044.8ms | 42.3ms | 23.8ms | 20.32 | 31.23 | −43.7% | +53.7% |
+| c=4 | 1960.9ms | 3601.9ms | 1278.8ms | 3873.7ms | 56.1ms | 44.0ms | 56.20 | 71.49 | −21.6% | +27.2% |
+| c=8 | 2199.3ms | 7193.7ms | 2394.5ms | 7414.9ms | 78.5ms | 58.3ms | 82.63 | 94.43 | −25.7% | +14.3% |
+| c=16 | 7919.4ms | 14024.6ms | 8139.7ms | 14575.0ms | 90.2ms | 72.8ms | 102.24 | 110.12 | −19.3% | +7.7% |
+
+> **p99 观察**：16K prompt 下 c=16 p99 高达 **14.0s~14.6s**，MTP 无改善甚至略差（+550ms）。长 prompt prefill 排队 + MTP draft 失败叠加使 p99 剧烈扩散。16K 下 PD+MTP 基本不可用于高并发。
 
 #### 7.4.4 跨场景交叉对比（c=1 基准点）
 
@@ -239,7 +247,7 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 | 4K→1K | 单服 MTP OFF（基线 §2.2） | 318.6ms | 42.0ms | 23.61 | 8 卡全家桶 |
 | 4K→1K | **单服 MTP ON（§2.3）** | 330.2ms | 23.5ms | **41.20** | 最优单服 |
 | 4K→1K | PD NoMTP | 326.6ms | 42.0ms | 23.64 | 16 卡，吞吐≈单服 MTP OFF |
-| 4K→1K | **PD MTP ON** | 320.6ms | 23.4ms | **41.92** | 16 卡，TTFT 反超单服 |
+| 4K→1K | **PD MTP ON** | 320.6ms | 23.4ms | **41.92** | 16 卡，TTFT 与单服持平（差 10ms，噪声级） |
 | 4K→128 | PD NoMTP | 307.1ms | 42.3ms | 22.53 | |
 | 4K→128 | PD MTP ON | 368.9ms | 23.5ms | 37.82 | |
 | 16K→128 | PD NoMTP | 922.3ms | 42.3ms | 20.32 | |
@@ -250,12 +258,13 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 | # | 结论 | 证据 | 置信度 |
 |:--|:--|:--|:--|
 | 1 | **MTP 在 PD 分离中增益与单服高度一致** | 4K/1K TPOT −44.3% vs −44.1%；吞吐 +77.3% vs +74.5% | ✅ 实测 |
-| 2 | **低并发 PD+MTP TTFT 反超单服** | c=1 TTFT 320.6ms vs 330.2ms（−3%），P 独立 GPU 消除资源争抢 | ✅ 实测 |
-| 3 | **PD 高并发 TTFT 恶化严重——P prefill 是瓶颈** | c=8 TTFT 898ms vs 单服 419ms（+114%）；c=16 时 2361ms vs 单服 894ms（+164%） | ⚠️ 致命 |
+| 2 | **低并发 PD+MTP TTFT"反超"不显著——噪声级差异** | c=1 TTFT 320.6ms vs 单服 330.2ms（仅差 9.6ms/−2.9%），在 bench_serving 压测噪声范围内（±~10ms）。16 卡只换来与 8 卡单服基本持平的 c=1 体验，性价比低 | ⚠️ 无效差异 |
+| 3 | **PD 高并发 TTFT 恶化严重——P prefill 是瓶颈** | PD c=8 TTFT 898ms vs 单服 c=8 419ms（+114%）；c=16 时 2361ms 继续攀升（单服无 c=16 数据，但 c=32 仅 894ms） | ⚠️ 致命 |
 | 4 | **PD 长 prompt（16K）退化更剧烈** | c=1 TPOT MTP 改善 −43.7% 但 c=16 改善仅 −19.3%，P prefill 排队吞掉 MTP 收益 | ⚠️ |
 | 5 | **短输出（128）MTP 收益随并发快速衰减** | TPOT 改善从 c=1 的 −44.4% 降到 c=16 的 −26.5% | ⚠️ |
-| 6 | **PD+MTP 天花板：单服 62%** | PD c=16 吞吐 463.3 vs 单服 c=32 的 781.8 tok/s——D 仅 8 卡做 decode | 已验证 |
+| 6 | **PD+MTP c=16 吞吐 = 单服 59.3%——天花板未到但差距显著** | PD c=16 吞吐 463.3 tok/s vs 单服 c=32 的 781.8 tok/s（463.3/781.8=59.3%）。注：§7.3.2 旧并发客户端曾测 486.2 tok/s（等值 62.2%），与本次 bench_serving 口径差异 ~5%，因客户端编排不同所致。PD 侧 c=8→c=16 吞吐仍从 282→463（+64%）未饱和，但 D 仅 8 卡做 decode 决定了高度上限 | 已验证 |
 | 7 | **`enforce_eager: true` 是 MTP 在 Ascend 910B2C 上的必要配置** | 不开启触发 torch.compile AssertionError（OutputCode vs GraphModuleImpl），关 npugraph_ex 误入歧途 | ✅ 定论 |
+| 8 | **长 prompt 高并发 p99 剧烈扩散——PD+MTP 长尾不可控** | 16K c=16 p99 高达 14.0~14.6s（比 p50 膨胀 1.8×）。c=16 时 4K→128 下 MTP p99（4169ms）反而不如 No-MTP（3912ms）——MTP draft 失败在高并发尾延迟中累积反噬 | ⚠️ 关键限制 |
 
 **数据文件**：`/tmp/pd_bench/pd_{mtp,nomtp}_{4k128,16k128,4k1k}_c{1,4,8,16}.json`（共 24 点），已持久化到共享盘 `pd_deployment/results/`
 **启动脚本**：`perf_opt/scripts/start_pd_mooncake.py --serial [--mtp]`
@@ -282,8 +291,8 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 | 远端 `/tmp/pd_test/_16kpd.log` | PD+MTP 对称 16K 基准 | 2026-11-03 |
 | 远端 `/tmp/pd_test/_16k_mtp_pd.log` | PD+MTP 对称 16K（含 E2E） | 2026-11-03 |
 | 远端 `/tmp/pd_test/_16k_asym.log` | PD+MTP 不对称 16K（P eager） | 2026-11-03 |
-| `pd_deployment/results/non_mtp/` | PD No-MTP 24 点 benchmark JSON（共享盘持久化） | 2026-11-10 |
-| `pd_deployment/results/mtp/` | PD MTP ON 24 点 benchmark JSON（共享盘持久化） | 2026-11-10 |
+| `pd_deployment/results/non_mtp/` | PD No-MTP 12 点 benchmark JSON（3 场景 × 4 并发，共享盘持久化） | 2026-11-10 |
+| `pd_deployment/results/mtp/` | PD MTP ON 12 点 benchmark JSON（3 场景 × 4 并发，共享盘持久化） | 2026-11-10 |
 
 ### 关键脚本
 

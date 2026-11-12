@@ -111,7 +111,7 @@ python3 pd_deployment/scripts/pd_read_results.py
 
 ```
 用户请求 → Prefill (NPU 0-7, :8000, kv_producer)
-                │  Mooncake TCP loopback KV transfer
+                │  ASCEND 协议 + AscendDirect NPU 直传
                 ▼
            Decode (NPU 8-15, :8001, kv_consumer) → 输出 token
 ```

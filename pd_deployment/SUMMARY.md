@@ -45,7 +45,7 @@
 ## 三、结论
 
 1. ✅ **MTP 在 P/D 分离部署中同样高效**：TPOT −44%、吞吐 +77%
-2. ✅ **低并发下 P/D 反超单服**：c=1 PD+MTP TTFT 320.6ms vs 单服 330.2ms
+2. ⚠️ **低并发 P/D TTFT 与单服持平**：c=1 PD+MTP TTFT 320.6ms vs 单服 330.2ms（仅差 10ms，噪声级）
 3. ⚠️ **高并发 TTFT 恶化**：c=8 P/D TTFT 898ms vs 单服 419ms（P prefill 排队）
 4. ✅ **短输出、长 prompt 场景一致**：MTP 在全矩阵中改善 TPOT −19~−44%
 
