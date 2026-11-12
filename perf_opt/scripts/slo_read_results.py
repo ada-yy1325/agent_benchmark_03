@@ -67,6 +67,9 @@ def climb_table(deployment, scenario, points):
         print(f"  ✅ SLO可用并发 c={good_c}  goodput={good_tp:.1f} tok/s")
     else:
         print(f"  ❌ 全点越线")
+    return {"deployment": deployment, "scenario": scenario,
+            "slo_concurrency": good_c, "goodput": good_tp, "points": points}
+
 def summary_table(results):
     """Print SLO conclusion summary."""
     print(f"\n{'='*120}")
