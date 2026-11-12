@@ -34,9 +34,10 @@ gen_launch_script() {
   local mtp="$4"     # 0 or 1
   local logfile="$5"
 
-  local mtp_json=""
+  local mtp_block=""
+  local spec_cfg='{"method":"mtp","num_speculative_tokens":1,"enforce_eager":true}'
   if [ "$mtp" = "1" ]; then
-    mtp_json=',"speculative_config":{"method":"mtp","num_speculative_tokens":1,"enforce_eager":true}'
+    mtp_block="--speculative-config '${spec_cfg}' \\"
   fi
 
   local add_cfg='{"ascend_compilation_config":{"enable_npugraph_ex":true,"enable_static_kernel":false},"enable_cpu_binding":true,"enable_dsa_cp":true,"multistream_overlap_shared_expert":true}'
@@ -92,7 +93,8 @@ vllm serve "\${MODEL}" \\
   --tool-call-parser deepseek_v4 \\
   --enable-auto-tool-choice \\
   --reasoning-parser deepseek_v4 \\
-  --additional-config '${add_cfg}'${mtp_json} \\
+  --additional-config '${add_cfg}' \\
+  ${mtp_block}
   2>&1 | tee ${logfile}
 LAUNCH_SCRIPT_EOF
   chmod +x "/tmp/_${name}_launch.sh"
