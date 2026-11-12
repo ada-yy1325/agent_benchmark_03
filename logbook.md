@@ -1,3 +1,55 @@
+# 2026-11-12 — SLO 约束并发爬坡基准测试
+
+## 一、环境约束（重要）
+
+| 执行位置 | NPU 访问 | vLLM 启动 | 压测/分析 |
+|----------|---------|-----------|----------|
+| `inspire notebook shell`（宿主机） | ✅ 完整 | ✅ 可用 | - |
+| `inspire notebook exec`（容器） | ⚠️ 主进程可见 | ❌ worker 子进程 `open device N failed` (107001) | ✅ 可用 |
+
+**根因**：exec 容器内 Python multiprocessing worker 子进程无法打开 `/dev/davinci*` 设备文件（`rtSetDevice` error 107001），即使主进程 `torch.npu.is_available()=True`。`fork`/`spawn` 均失败，`nsenter` 被安全策略禁止。
+
+**补救**：已创建 `perf_opt/scripts/svc_ctl.sh`，服务启动需用户 shell 执行一次：
+```bash
+bash perf_opt/scripts/svc_ctl.sh up_single   # 单服 TP8+MTP
+bash perf_opt/scripts/svc_ctl.sh up_dual     # 双服 TP8+MTP
+bash perf_opt/scripts/svc_ctl.sh down        # 停止
+bash perf_opt/scripts/svc_ctl.sh status      # 状态
+```
+压测和分析 100% 由 exec 自主完成，无需用户再介入。
+
+## 二、SLO 口径
+
+- TTFT p90 < 5,000 ms
+- TPOT p90 < 30 ms
+- 任一指标越线 = 劣化；最大未越线并发 = SLO 可用并发
+- 并发梯度: [8, 16, 32, 48, 64, 96, 128]
+- 连续 2 个并发点双指标越线 → 停止爬坡
+
+## 三、pd_nomtp 结果
+
+| 场景 | 结果 | 细节 |
+|------|------|------|
+| 16k1k | ❌ c=8 双指标越线 (TTFT 7471ms, TPOT 49ms) | c=16 确认后停止 |
+| 4k1k | ❌ c=16 TPOT 先崩 (49.5ms)，c=48 双指标越线 | 无 SLO 通过并发 |
+
+**结论**：NoMTP 全线不可用。TPOT p90 始终 49-65ms，远超 30ms 阈值。
+
+## 四、pd_mtp 结果
+
+| 场景 | 结果 | 细节 |
+|------|------|------|
+| 16k1k | ❌ c=8 双指标越线 (TTFT 7746ms, TPOT 31.9ms) | c=16 确认后停止 |
+| 4k1k | ✅ **c=8 SLO 通过** (TTFT 1797ms, TPOT 26.83ms) | c=16 仅 TPOT 超标 (32.8ms), c=32 双指标越线 |
+
+**结论**：PD+MTP 在 4k1k 短输入场景有可用窗口（c=8），TPOT 从 NoMTP 的 49ms 降至 26.8ms（MTP 减少 ~45%）。16k 长输入 TTFT 线先爆。
+
+## 五、后续
+
+- ⏳ 单服 TP8+MTP（8卡，核心对照点：c=8 TPOT p90 vs PD 26.83ms）
+- ⏳ 双服 TP8+MTP（16卡）
+- 4 场景压测 + 汇总表 + 邮件 + 收尾
+
 # 2026-11-06 — PD 攻坚第十回合：Proxy 搭建 + Mooncake 配置修正
 
 ## 一、做了什么
