@@ -79,23 +79,66 @@ bash perf_opt/scripts/svc_ctl.sh status      # 状态
 
 **MTP 将 TPOT 从 43ms 降至 27-28ms，提升 ~37%，是当前最有效的单点优化。**
 
-## 六、48 对比表（完整）
+## 六、dual_mtp 结果
+
+| 场景 | 结果 | 细节 |
+|------|------|------|
+| 16k1k | ✅ **c=8 SLO 通过** (TTFT 3591ms, TPOT 27.3ms) | 首个 16k1k 过 SLO 的部署！c=16 双越线 (TTFT 7722, TPOT 32.0) |
+| 16k1k goodput | **282.9 tok/s @c=8** | 每服仅 c=4，低压确保 TTFT 和 TPOT 均在线内 |
+| 4k1k | ✅ **c=16 SLO 通过** (TTFT 1961ms, TPOT 28.4ms) | c=32 仅 TPOT 越线 (32.3ms), c=48 双越线 |
+| 4k1k goodput | **538.8 tok/s @c=16** | vs pd_mtp 288.1 (1.87×), vs single 277.1 (1.94×) |
+
+### 16k1k 每服详细 @c=16 (c=8/svr)
+
+| 服务 | goodput | TTFT p90 | TPOT p90 |
+|------|:--|:--|:--|
+| dual_a (:8000) | 226.8 tok/s | 8076ms | 32.0ms |
+| dual_b (:8001) | 231.0 tok/s | 7368ms | 32.1ms |
+| single c=8 对照 | 227.1 tok/s | 7899ms | 33.4ms |
+
+**每服 c=8 的 16k1k 性能几乎完全一致**（goodput 226-231 tok/s），证实双服没有额外通信开销，线性聚合。
+
+### 4k1k 完整爬坡
+
+| c (总) | c/svr | TTFT p90 | TPOT p90 | goodput | SLO |
+|:--|:--|:--|:--|:--|:--|
+| 8 | 4 | 1082ms | 25.0ms | 318.0 | ✅ |
+| 16 | 8 | 1961ms | 28.4ms | 538.8 | ✅ |
+| 32 | 16 | 3710ms | 32.3ms | 933.1 | ⛔ TPOT |
+| 48 | 24 | 5095ms | 36.6ms | 1268.4 | ⛔⛔ |
+| 64 | 32 | 6511ms | 41.4ms | 1494.0 | ⛔⛔ |
+
+## 七、最终 4×2 对比表（完整）
 
 | 部署 | 场景 | 可用并发 | goodput | 卡数 | 首个越线 |
 |------|------|:--:|:--:|:--:|------|
+| dual_mtp | 16k1k | **8** | 282.9 | 16 | TTFT+TPOT c=16 |
+| dual_mtp | 4k1k | **16** | 538.8 | 16 | TPOT=32.3ms @c=32 |
 | pd_mtp | 16k1k | — | — | 16 | TTFT+TPOT c=8 |
-| pd_mtp | 4k1k | **8** | 288.1 | 16 | TPOT=32.8ms @c=16 |
+| pd_mtp | 4k1k | 8 | 288.1 | 16 | TPOT=32.8ms @c=16 |
 | pd_nomtp | 16k1k | — | — | 16 | TTFT+TPOT c=8 |
 | pd_nomtp | 4k1k | — | — | 16 | TPOT=43.3ms @c=8 |
 | single_mtp | 16k1k | — | — | 8 | TTFT+TPOT c=8 |
-| single_mtp | 4k1k | **8** | 277.1 | 8 | TPOT=33.5ms @c=16 |
+| single_mtp | 4k1k | 8 | 277.1 | 8 | TPOT=33.5ms @c=16 |
 
-**结论：8 卡 single_mtp 性能≈16 卡 pd_mtp（4k1k goodput 差距 3.8%），TPOT 已接近 PD 水平，TTFT 略弱但仍在同数量级。PD decode 隔离在当前 MTP 场景下无显著收益。**
+### Goodput 阶梯（4k1k 最优可用并发）
 
-## 七、后续
+```
+single_mtp (8卡)  ████████████████████████ 277 tok/s @c=8
+pd_mtp    (16卡)  █████████████████████████ 288 tok/s @c=8   (PD 无显著增益)
+dual_mtp  (16卡)  ████████████████████████████████████████████████████ 539 tok/s @c=16
+                  └─ 2× servers, 2× goodput, 线性 scaling ─┘
+```
 
-- ⏳ 双服 TP8+MTP（16卡，验证单服→双服 scaling 增益）
-- 📊 全部场景完成后：汇总表 + 邮件通知 + 保存镜像
+## 八、结论
+
+1. **dual_mtp 是唯一在所有场景都有 SLO 通过的部署**，16k1k 和 4k1k 均有可用窗口
+2. **单服→双服 scaling 近乎线性**：goodput 277→539 tok/s (1.94×)，每服内部 TTFT/TPOT 基本不变
+3. **PD decode 隔离无实际收益**：当前 MTP 场景下 TPOT 差异 <2ms，16 卡带宽开销对冲了隔离好处
+4. **MTP 是最关键单点优化**：将 TPOT 从 43ms 降至 25-28ms（↓37%），无 MTP 全线不可用
+5. **推荐生产配置**：双 TP8+MTP（16 卡），对半分流，单侧 c=8-16 为甜蜜点
+
+## 九、后续
 
 # 2026-11-06 — PD 攻坚第十回合：Proxy 搭建 + Mooncake 配置修正
 
