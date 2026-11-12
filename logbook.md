@@ -44,11 +44,58 @@ bash perf_opt/scripts/svc_ctl.sh status      # 状态
 
 **结论**：PD+MTP 在 4k1k 短输入场景有可用窗口（c=8），TPOT 从 NoMTP 的 49ms 降至 26.8ms（MTP 减少 ~45%）。16k 长输入 TTFT 线先爆。
 
-## 五、后续
+## 五、single_mtp 结果
 
-- ⏳ 单服 TP8+MTP（8卡，核心对照点：c=8 TPOT p90 vs PD 26.83ms）
-- ⏳ 双服 TP8+MTP（16卡）
-- 4 场景压测 + 汇总表 + 邮件 + 收尾
+| 场景 | 结果 | 细节 |
+|------|------|------|
+| 16k1k | ❌ c=8 双指标越线 (TTFT 7899ms, TPOT 33.4ms) | c=16 确认后停止；比 pd_mtp 略差但同一数量级 |
+| 4k1k | ✅ **c=8 SLO 通过** (TTFT 2036ms, TPOT 27.9ms) | c=16 仅 TPOT 超标 (33.5ms), c=32 双指标越线 |
+| 4k1k goodput | **277.1 tok/s @c=8** | vs pd_mtp 288.1 tok/s，仅低 3.8% |
+
+### 对比 pd_mtp vs single_mtp @ 4k1k c=8
+
+| 指标 | pd_mtp (16卡) | single_mtp (8卡) | Δ |
+|------|:---:|:---:|:--:|
+| TTFT p90 | 1797ms | 2036ms | +239ms (+13.3%) |
+| TPOT p90 | 26.8ms | 27.9ms | +1.1ms (+4.1%) |
+| goodput | 288.1 tok/s | 277.1 tok/s | -11.0 (-3.8%) |
+
+### PD decode 隔离分析 @16k1k
+
+| 并发 | PD TPOT p90 | 单服 TPOT p90 | Δ |
+|:--|:--|:--|:--|
+| c=8 | 31.9ms | 33.4ms | -1.5ms ✅ PD 更稳 |
+| c=16 | 42.5ms | 41.4ms | +1.1ms 单服略优 |
+
+**PD decode 隔离在轻载下 TPOT 稍稳（~1.5ms），但高并发下优势消失——16 卡带宽开销抵消了隔离收益。**
+
+### MTP 增益独立对比 @4k1k c=8
+
+| 部署 | TPOT p90 | vs NoMTP |
+|------|:--|:--|
+| pd_nomtp | 43.3ms | — |
+| pd_mtp | 26.8ms | ↓38% |
+| single_mtp | 27.9ms | ↓36% |
+
+**MTP 将 TPOT 从 43ms 降至 27-28ms，提升 ~37%，是当前最有效的单点优化。**
+
+## 六、48 对比表（完整）
+
+| 部署 | 场景 | 可用并发 | goodput | 卡数 | 首个越线 |
+|------|------|:--:|:--:|:--:|------|
+| pd_mtp | 16k1k | — | — | 16 | TTFT+TPOT c=8 |
+| pd_mtp | 4k1k | **8** | 288.1 | 16 | TPOT=32.8ms @c=16 |
+| pd_nomtp | 16k1k | — | — | 16 | TTFT+TPOT c=8 |
+| pd_nomtp | 4k1k | — | — | 16 | TPOT=43.3ms @c=8 |
+| single_mtp | 16k1k | — | — | 8 | TTFT+TPOT c=8 |
+| single_mtp | 4k1k | **8** | 277.1 | 8 | TPOT=33.5ms @c=16 |
+
+**结论：8 卡 single_mtp 性能≈16 卡 pd_mtp（4k1k goodput 差距 3.8%），TPOT 已接近 PD 水平，TTFT 略弱但仍在同数量级。PD decode 隔离在当前 MTP 场景下无显著收益。**
+
+## 七、后续
+
+- ⏳ 双服 TP8+MTP（16卡，验证单服→双服 scaling 增益）
+- 📊 全部场景完成后：汇总表 + 邮件通知 + 保存镜像
 
 # 2026-11-06 — PD 攻坚第十回合：Proxy 搭建 + Mooncake 配置修正
 
