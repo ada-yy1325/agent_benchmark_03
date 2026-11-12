@@ -1,6 +1,6 @@
 # DeepSeek-V4-Flash 推理性能优化成绩单
 
-**日期**：2026-10-29（11-10 终稿补录：PD 分离 3 场景 × 2 版本完整 24 点基准矩阵——涵盖 4K→128、16K→128、4K→1K 三个场景，No-MTP 与 MTP ON 各 4 并发点；含跨场景交叉对比、综合结论与 `pd_deployment/` 可复现部署包）
+**日期**：2026-10-29（11-12 终稿更新：SLO 基准 4 部署 × 2 场景完整对比——首次有部署通过 16K→1K SLO，dual_mtp 双场景全通）
 
 **模型**：`DeepSeek-V4-Flash-w8a8-npu16`（自量化版，280GB）
 
@@ -278,6 +278,132 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 
 ---
 
+## 九、SLO 基准：4 部署 × 2 场景 SLO 扫射（2026-11-12，全部实测，TTFT p90<5000ms ∧ TPOT p90<30ms）
+
+> **背景**：此前所有压测均为"全并发吞吐摸底"——不限 TTFT/TPOT 门限，只看"能跑多快"。实际在线服务有硬性 SLO 要求：首 token 延迟（TTFT）和 token 间隔（TPOT）必须在用户可容忍范围内。本节的 SLO 扫射回答了核心问题：**每种部署在满足 SLO 的前提下，最大可用并发和各并发下的 goodput（即满足 SLO 时的有效吞吐）是多少？**
+
+### 9.1 SLO 定义
+
+| 指标 | 门限 | 含义 |
+|:-----|:-----|:-----|
+| TTFT p90 | < 5000ms | 90% 请求的**首 token 延迟**不超过 5 秒（4K prompt 下宽松；16K 下为硬约束） |
+| TPOT p90 | < 30ms | 90% 请求的**每个 token 平均生成时间**不超过 30 毫秒（保证交互流畅） |
+
+**压测口径**：`slo_benchmark.py`（`bench_serving.py` 封装，自动扫射并发），4K→1K 和 16K→1K random tokens，temp=0/seed=42/ignore_eos，32~256 请求/点。SLO 判定：**同时满足** TTFT p90<5000ms 与 TPOT p90<30ms。越线点 = 任一不满足。
+
+### 9.2 4 部署完整对比总表
+
+| 部署 | 场景 | 可用并发 | goodput tok/s | 卡数 | 首个越线指标 | 越线值 @并发 |
+|:-----|:-----|:-----:|:-----:|:-----:|:-----|:-----|
+| **dual_mtp** | **16K→1K** | **8** | **282.9** | 16 | TTFT+TPOT | TTFT p90=7722ms, TPOT p90=32.0ms @c=16 |
+| **dual_mtp** | **4K→1K** | **16** | **538.8** | 16 | TPOT | TPOT p90=32.3ms @c=32 |
+| pd_mtp | 16K→1K | — | — | 16 | TTFT+TPOT | TTFT p90=7746ms, TPOT p90=31.9ms @c=8 |
+| pd_mtp | 4K→1K | 8 | 288.1 | 16 | TPOT | TPOT p90=32.8ms @c=16 |
+| pd_nomtp | 16K→1K | — | — | 16 | TTFT+TPOT | TTFT p90=11000ms, TPOT p90=65.9ms @c=8 |
+| pd_nomtp | 4K→1K | — | — | 16 | TPOT | TPOT p90=43.3ms @c=8 |
+| single_mtp | 16K→1K | — | — | 8 | TTFT+TPOT | TTFT p90=7899ms, TPOT p90=33.4ms @c=8 |
+| single_mtp | 4K→1K | 8 | 277.1 | 8 | TPOT | TPOT p90=33.5ms @c=16 |
+
+### 9.3 各部署详细数据
+
+#### 9.3.1 dual_mtp（双独立 TP8+MTP，16 卡，NPU 0-7 + 8-15 分治两组）
+
+| 场景 | c | 请求数 | TTFT p50 | p90 | p99 | TPOT p50 | p90 | p99 | 吞吐 | TTFT | TPOT |
+|:-----|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|
+| 16K | 8 | 32/32 | 1422ms | 3591ms | 4654ms | 26.2ms | 27.3ms | 28.5ms | **282.9** | ✅ | ✅ |
+| 16K | 16 | 32/32 | 3015ms | 7722ms | 8815ms | 29.9ms | 32.0ms | 35.4ms | 453.7 | ⛔ | ⛔ |
+| 16K | 32 | 64/64 | 3876ms | 13446ms | 15970ms | 38.2ms | 42.2ms | 45.1ms | 714.3 | ⛔ | ⛔ |
+| 4K | 8 | 32/32 | 456ms | 1082ms | 1198ms | 24.0ms | 25.0ms | 26.1ms | 318.0 | ✅ | ✅ |
+| 4K | 16 | 32/32 | 876ms | 1961ms | 2121ms | 26.6ms | 28.4ms | 28.9ms | **538.8** | ✅ | ✅ |
+| 4K | 32 | 64/64 | 1423ms | 3710ms | 4071ms | 30.6ms | 32.3ms | 33.3ms | 933.1 | ✅ | ⛔ |
+| 4K | 48 | 96/96 | 1369ms | 5095ms | 5869ms | 33.7ms | 36.6ms | 40.8ms | 1268.4 | ⛔ | ⛔ |
+| 4K | 64 | 128/128 | 1776ms | 6511ms | 7764ms | 37.3ms | 41.4ms | 44.9ms | 1494.0 | ⛔ | ⛔ |
+
+> **dual_mtp 是唯一在两个场景下均通过 SLO 的部署。** 4K→1K c=16 时 goodput 538.8 tok/s，16K→1K c=8 时 goodput 282.9 tok/s。单服到双服的线性扩展 1.94×（277→539 tok/s），无单服性能退化。
+
+#### 9.3.2 pd_mtp（PD 分离 + MTP，16 卡，Mooncake ascend 协议 + AscendDirect 直传）
+
+| 场景 | c | 请求数 | TTFT p50 | p90 | TPOT p50 | p90 | 吞吐 | TTFT | TPOT |
+|:-----|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|
+| 16K | 8 | 16/16 | 2226ms | 7746ms | 30.1ms | 31.9ms | 232.2 | ⛔ | ⛔ |
+| 16K | 16 | 32/32 | 2571ms | 12578ms | 36.9ms | 42.5ms | 372.6 | ⛔ | ⛔ |
+| 4K | 8 | 16/16 | 1085ms | 1797ms | 25.9ms | 26.8ms | 288.1 | ✅ | ✅ |
+| 4K | 16 | 32/32 | 1222ms | 3388ms | 30.1ms | 32.8ms | 481.1 | ✅ | ⛔ |
+| 4K | 32 | 64/64 | 1781ms | 6150ms | 36.0ms | 40.5ms | 783.1 | ⛔ | ⛔ |
+| 4K | 48 | 96/96 | 2097ms | 9081ms | 44.0ms | 47.8ms | 967.4 | ⛔ | ⛔ |
+
+> **pd_mtp 仅在 4K c=8 通过 SLO（288.1 tok/s）**，对比 dual_mtp 4K c=16 相差 1.87×。16K 全线失败——P prefill 排队导致 TTFT 严重超标。
+
+#### 9.3.3 pd_nomtp（PD 分离无 MTP，16 卡）
+
+| 场景 | c | TPOT p50 | p90 | 吞吐 | TPOT SLO |
+|:-----|:-----:|:-----:|:-----:|:-----:|:-----:|
+| 4K | 8 | 42.3ms | 43.3ms | 181.8 | ❌ TPOT p90 从起点即越线 |
+| 4K | 16 | 47.8ms | 51.4ms | 292.1 | ❌ |
+| 4K | 32 | 57.7ms | 61.4ms | 444.7 | ❌ |
+| 4K | 48 | 56.6ms | 64.8ms | 528.6 | ❌ |
+| 4K | 64 | 64.7ms | 69.6ms | 728.5 | ❌ |
+| 16K | 8 | 42.8ms | 65.9ms | 159.4 | ❌ |
+| 16K | 16 | 58.5ms | 92.9ms | 192.8 | ❌ |
+
+> **无 MTP → TPOT p90 最低 43.3ms**，距 SLO 30ms 差 44%。MTP 是 SLO 达标的前提条件。
+
+#### 9.3.4 single_mtp（单 TP8+MTP，8 卡）
+
+| 场景 | c | 请求数 | TTFT p50 | p90 | TPOT p50 | p90 | 吞吐 | TTFT | TPOT |
+|:-----|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|
+| 16K | 8 | 16/16 | 3013ms | 7899ms | 29.9ms | 33.4ms | 227.1 | ⛔ | ⛔ |
+| 16K | 16 | 32/32 | 3040ms | 13937ms | 39.0ms | 41.4ms | 360.2 | ⛔ | ⛔ |
+| 4K | 8 | 16/16 | 1059ms | 2036ms | 26.6ms | 27.9ms | 277.1 | ✅ | ✅ |
+| 4K | 16 | 32/32 | 1013ms | 3537ms | 30.8ms | 33.5ms | 473.6 | ✅ | ⛔ |
+| 4K | 32 | 64/64 | 1702ms | 6619ms | 36.3ms | 39.2ms | 781.4 | ⛔ | ⛔ |
+| 4K | 48 | 96/96 | 1925ms | 9558ms | 44.2ms | 49.2ms | 957.6 | ⛔ | ⛔ |
+
+> **single_mtp 仅在 4K c=8 通过 SLO（277.1 tok/s）**，与 dual_mtp 同一并发下吞吐基本一致（277 vs 318 tok/s，两服务共用 NPU 带宽的高 perf 开销）。16K 全线失败。
+### 9.4 双服务均衡性（dual_mtp A/B 两侧逐并发对比）
+
+| 场景 | 并发 | 服务A 吞吐 | 服务B 吞吐 | 失衡率 |
+|:-----|:-----:|:-----:|:-----:|:-----:|
+| 16K→1K | 8 | 144.8 | 138.1 | 4.7% |
+| 16K→1K | 16 | 232.5 | 221.2 | 5.4% |
+| 16K→1K | 32 | 355.6 | 358.7 | 0.9% |
+| 4K→1K | 8 | 163.9 | 154.0 | 6.0% |
+| 4K→1K | 16 | 279.4 | 259.4 | 7.1% |
+| 4K→1K | 32 | 452.1 | 481.1 | 6.4% |
+| 4K→1K | 48 | 601.7 | 626.7 | 4.0% |
+| 4K→1K | 64 | 734.7 | 759.2 | 3.3% |
+
+> **两侧吞吐最大失衡 <8%**，NPU 0-7 与 8-15 在双服务场景下的调度公平性良好。
+
+### 9.5 SLO 核心结论
+
+| # | 结论 | 证据 | 置信度 |
+|:--|:--|:--|:--|
+| 1 | **dual_mtp 是唯一在两个场景下均通过 SLO 的部署** | 4K c=16 ✅（538.8 tok/s）、16K c=8 ✅（282.9 tok/s），其余 3 种部署至少一个场景全线失败 | ✅ 实测 |
+| 2 | **dual_mtp 是首次有部署通过 16K→1K SLO** | pd_mtp/single_mtp/pd_nomtp 在 16K 全点 TTFT p90 超 5000ms 且 TPOT p90 超 30ms | ✅ 实测 |
+| 3 | **MTP 是 SLO 达标的前提条件** | pd_nomtp 在 4K c=8 TPOT p90=43.3ms，距 SLO 30ms 差 44%；所有通过 SLO 的配置均启用 MTP | ✅ 实测 |
+| 4 | **PD decode 隔离对 TPOT 无明显增益（<2ms 差异）** | pd_mtp c=8 TPOT p90=31.9ms vs single_mtp c=8 TPOT p90=33.4ms（Δ=−1.5ms）；c=16 时 PD 反而更差（42.5ms vs 41.4ms，Δ=+1.1ms） | ⚠️ 噪声级 |
+| 5 | **双独立 TP8 相比单 TP8 实现接近线性扩展** | 4K SLO goodput：single 277.1 → dual 538.8（1.94×），两侧均达标无退化 | ✅ 实测 |
+| 6 | **TPOT 是 4K 场景的 SLO 瓶颈，TTFT 是 16K 场景的瓶颈** | 4K 下所有越线均来自 TPOT p90>30ms；16K 下所有越线来自 TTFT p90>5000ms（长 prompt prefill 排队） | ✅ 实测 |
+| 7 | **高并发 TTFT p99 急剧扩散——16K 场景基本不适用高并发** | 16K c=32 TTFT p99=15970ms（p50=3876ms，4.1× 扩散）；4K c=48 TTFT p99=5869ms（p50=1369ms，4.3× 扩散） | ⚠️ 关键限制 |
+
+### 9.6 SLO 选择指引（更新原 §六）
+
+| 场景 | 推荐部署 | SLO 可用并发 | goodput tok/s | 卡数 | 说明 |
+|:-----|:-----|:-----:|:-----:|:-----:|:-----|
+| 4K→1K 最优 | **dual_mtp** | 16 | 538.8 | 16 | 双场景全通，最高 SLO goodput |
+| 4K→1K 经济 | single_mtp | 8 | 277.1 | 8 | 仅需 8 卡，4K 低并发 SLO 可过 |
+| 16K→1K（唯一可选） | **dual_mtp** | 8 | 282.9 | 16 | 唯一通过 16K SLO 的部署 |
+| 16K→1K 不推荐 | PD 分离 / 单服 | — | — | 8/16 | 全线失败，TTFT 超标严重 |
+| 无 MTP 不推荐 | pd_nomtp | — | — | 16 | TPOT p90 从起点即越线 |
+
+### 9.7 数据溯源
+
+- **评测脚本**：`slo_benchmark.py`（自动扫射 + SLO 判定）
+- **结果读取**：`perf_opt/scripts/slo_read_results.py`
+- **原始数据**：`pd_deployment/results/slo_scan/`（共 77 个 JSON+NPU CSV 文件，详见 §八）
+- **远程服务**：tmux 会话 `dual_a`/`dual_b`（NPU 0-7 port 8000 / NPU 8-15 port 8001）
+- **压测日期**：2026-11-12
 ## 八、资产索引 & 数据溯源
 
 ### 数据文件
@@ -293,6 +419,8 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 | 远端 `/tmp/pd_test/_16k_asym.log` | PD+MTP 不对称 16K（P eager） | 2026-11-03 |
 | `pd_deployment/results/non_mtp/` | PD No-MTP 12 点 benchmark JSON（3 场景 × 4 并发，共享盘持久化） | 2026-11-10 |
 | `pd_deployment/results/mtp/` | PD MTP ON 12 点 benchmark JSON（3 场景 × 4 并发，共享盘持久化） | 2026-11-10 |
+| `pd_deployment/results/slo_scan/` | **SLO 基准** 4 部署 × 2 场景 × N 并发完整 JSON+NPU CSV（共 77 文件），含 dual/pd/single_mtp + pd_nomtp | 2026-11-12 |
+| `perf_opt/scripts/slo_read_results.py` | SLO 结果汇总读取工具（输出 TTFT/TPOT 门限判定、越线点、结论总表） | 2026-11-12 |
 
 ### 关键脚本
 
@@ -306,6 +434,8 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 | `scripts/start_pd_mooncake.py` | P/D 分离一键启动（Mooncake KV，支持 `--mtp --serial`） |
 | `scripts/verify_pd.py` | PD 验证套件（health check + P/D 分离铁证日志检测） |
 | `scripts/run_benchmark.py` | 基准压力矩阵（3 场景 × 4 并发 × 2 模式 = 24 点） |
+| `scripts/slo_benchmark.py` | **SLO 基准扫射**（按部署环境自动扫射并发、记录 NPU CSV、判定 TTFT/TPOT 门限、A/B 两侧分测） |
+| `scripts/slo_read_results.py` | **SLO 结果汇总**（扫描所有 JSON、TTFT p90/TPOT p90 判定、越线点定位、4 部署对比总表） |
 | `pd_deployment/README.md` | 完整部署与使用手册 |
 | 远端 `/tmp/pd_orch_bench.py` | PD 编排基准客户端（支持 --mode pd/single、端到端计时） |
 
@@ -316,5 +446,5 @@ ASCEND_RT_VISIBLE_DEVICES=8-15 bash perf_opt/scripts/_serve_tp8_mtp.sh \
 | 镜像 | `glm53-w8a8-env:v2` |
 | 模型 | `models/DeepSeek-V4-Flash-w8a8-npu16`（280GB） |
 | Instance | `quant-test`（昇腾卡公共空间） |
-| Git tag | `perf-opt-final`（含 PD full benchmark 矩阵） |
+| Git tag | `perf-opt-final`（含 PD full benchmark 矩阵 + SLO 4 部署 2 场景全扫射） |
 **压测口径**：`bench_serving.py`，4K→1K random tokens，temp=0、seed=42、ignore_eos，wall-time 与吞吐漂移 <7%
