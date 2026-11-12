@@ -1,0 +1,56 @@
+{
+  "case_id": "dual_mtp_4k1k_c8_b",
+  "input_len": 4096,
+  "output_len": 1024,
+  "concurrency": 4,
+  "temperature": 0.0,
+  "ignore_eos": true,
+  "seed": 42,
+  "planned_requests": 16,
+  "successful_requests": 16,
+  "failed_requests": 0,
+  "wall_time_s": 103.034,
+  "total_input_tokens": 65536,
+  "total_output_tokens": 16384,
+  "output_tokens_per_s": 159.02,
+  "total_tokens_per_s": 795.08,
+  "ttft_ms": {
+    "p50": 498.37,
+    "p90": 1137.22,
+    "p99": 1239.51,
+    "mean": 657.83
+  },
+  "tpot_ms": {
+    "p50": 23.96,
+    "p90": 25.3,
+    "p99": 27.1,
+    "mean": 24.28
+  },
+  "e2e_ms": {
+    "p50": 25105.0,
+    "p99": 28170.82
+  },
+  "success_rate": 1.0,
+  "peak_hbm_mb_per_npu": [
+    61540,
+    61491,
+    61498,
+    61498,
+    61500,
+    61507,
+    61495,
+    61497,
+    61497,
+    61504,
+    61496,
+    61494,
+    61496,
+    61497,
+    61490,
+    61498
+  ],
+  "avg_output_tokens_per_request": 1024.0,
+  "fallback_to_text": false,
+  "timestamp": "2026-11-12T17:10:48.260301",
+  "errors": []
+}

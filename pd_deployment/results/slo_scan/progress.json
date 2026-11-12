@@ -1,0 +1,44 @@
+{
+  "pd_nomtp/16k1k": [
+    "pd_nomtp_16k1k_c8",
+    "pd_nomtp_16k1k_c16"
+  ],
+  "pd_nomtp/4k1k": [
+    "pd_nomtp_4k1k_c32",
+    "pd_nomtp_4k1k_c16",
+    "pd_nomtp_4k1k_c48",
+    "pd_nomtp_4k1k_c8"
+  ],
+  "pd_mtp/16k1k": [
+    "pd_mtp_16k1k_c16",
+    "pd_mtp_16k1k_c8"
+  ],
+  "pd_mtp/4k1k": [
+    "pd_mtp_4k1k_c32",
+    "pd_mtp_4k1k_c48",
+    "pd_mtp_4k1k_c16",
+    "pd_mtp_4k1k_c8"
+  ],
+  "single_mtp/16k1k": [
+    "single_mtp_16k1k_c8",
+    "single_mtp_16k1k_c16"
+  ],
+  "single_mtp/4k1k": [
+    "single_mtp_4k1k_c16",
+    "single_mtp_4k1k_c32",
+    "single_mtp_4k1k_c48",
+    "single_mtp_4k1k_c8"
+  ],
+  "dual_mtp/16k1k": [
+    "dual_mtp_16k1k_c32",
+    "dual_mtp_16k1k_c8",
+    "dual_mtp_16k1k_c16"
+  ],
+  "dual_mtp/4k1k": [
+    "dual_mtp_4k1k_c16",
+    "dual_mtp_4k1k_c48",
+    "dual_mtp_4k1k_c8",
+    "dual_mtp_4k1k_c64",
+    "dual_mtp_4k1k_c32"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "case_id": "dual_mtp_4k1k_c8_a",
+  "input_len": 4096,
+  "output_len": 1024,
+  "concurrency": 8,
+  "planned_requests": 32,
+  "successful_requests": 32,
+  "failed_requests": 0,
+  "wall_time_s": 103.034,
+  "total_input_tokens": 131072,
+  "total_output_tokens": 32768,
+  "output_tokens_per_s": 318.03,
+  "ttft_ms": {
+    "p50": 455.85,
+    "p90": 1081.84,
+    "p99": 1198.28,
+    "mean": 618.17
+  },
+  "tpot_ms": {
+    "p50": 24.0,
+    "p90": 24.98,
+    "p99": 26.09,
+    "mean": 24.16
+  },
+  "success_rate": 1.0,
+  "aggregated_from_dual": true,
+  "timestamp": "2026-11-12T17:10:49.603222"
+}

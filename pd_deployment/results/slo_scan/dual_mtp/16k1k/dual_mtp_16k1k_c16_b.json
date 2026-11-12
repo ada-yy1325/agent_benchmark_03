@@ -1,0 +1,56 @@
+{
+  "case_id": "dual_mtp_16k1k_c16_b",
+  "input_len": 16384,
+  "output_len": 1024,
+  "concurrency": 8,
+  "temperature": 0.0,
+  "ignore_eos": true,
+  "seed": 42,
+  "planned_requests": 16,
+  "successful_requests": 16,
+  "failed_requests": 0,
+  "wall_time_s": 70.934,
+  "total_input_tokens": 262144,
+  "total_output_tokens": 16384,
+  "output_tokens_per_s": 230.97,
+  "total_tokens_per_s": 3926.57,
+  "ttft_ms": {
+    "p50": 2556.5,
+    "p90": 7368.03,
+    "p99": 8492.54,
+    "mean": 3621.23
+  },
+  "tpot_ms": {
+    "p50": 29.81,
+    "p90": 32.09,
+    "p99": 36.27,
+    "mean": 30.32
+  },
+  "e2e_ms": {
+    "p50": 34029.16,
+    "p99": 40360.17
+  },
+  "success_rate": 1.0,
+  "peak_hbm_mb_per_npu": [
+    61535,
+    61486,
+    61493,
+    61494,
+    61495,
+    61502,
+    61490,
+    61492,
+    61492,
+    61499,
+    61491,
+    61489,
+    61491,
+    61492,
+    61485,
+    61494
+  ],
+  "avg_output_tokens_per_request": 1024.0,
+  "fallback_to_text": false,
+  "timestamp": "2026-11-12T17:02:16.816643",
+  "errors": []
+}

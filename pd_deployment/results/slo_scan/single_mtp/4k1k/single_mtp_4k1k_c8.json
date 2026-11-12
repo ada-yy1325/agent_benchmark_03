@@ -1,0 +1,56 @@
+{
+  "case_id": "single_mtp_4k1k_c8",
+  "input_len": 4096,
+  "output_len": 1024,
+  "concurrency": 8,
+  "temperature": 0.0,
+  "ignore_eos": true,
+  "seed": 42,
+  "planned_requests": 16,
+  "successful_requests": 16,
+  "failed_requests": 0,
+  "wall_time_s": 59.119,
+  "total_input_tokens": 65536,
+  "total_output_tokens": 16384,
+  "output_tokens_per_s": 277.13,
+  "total_tokens_per_s": 1385.67,
+  "ttft_ms": {
+    "p50": 1059.43,
+    "p90": 2035.7,
+    "p99": 2185.29,
+    "mean": 1129.97
+  },
+  "tpot_ms": {
+    "p50": 26.63,
+    "p90": 27.9,
+    "p99": 28.35,
+    "mean": 26.78
+  },
+  "e2e_ms": {
+    "p50": 28454.71,
+    "p99": 30028.97
+  },
+  "success_rate": 1.0,
+  "peak_hbm_mb_per_npu": [
+    61540,
+    61490,
+    61498,
+    61498,
+    61499,
+    61506,
+    61495,
+    61497,
+    3434,
+    3441,
+    3433,
+    3431,
+    3433,
+    3434,
+    3427,
+    3435
+  ],
+  "avg_output_tokens_per_request": 1024.0,
+  "fallback_to_text": false,
+  "timestamp": "2026-11-12T16:26:55.590240",
+  "errors": []
+}

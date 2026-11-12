@@ -1,0 +1,56 @@
+{
+  "case_id": "pd_nomtp_16k1k_c8",
+  "input_len": 16384,
+  "output_len": 1024,
+  "concurrency": 8,
+  "temperature": 0.0,
+  "ignore_eos": true,
+  "seed": 42,
+  "planned_requests": 16,
+  "successful_requests": 16,
+  "failed_requests": 0,
+  "wall_time_s": 104.355,
+  "total_input_tokens": 262144,
+  "total_output_tokens": 16384,
+  "output_tokens_per_s": 157.0,
+  "total_tokens_per_s": 2669.04,
+  "ttft_ms": {
+    "p50": 2555.47,
+    "p90": 7470.82,
+    "p99": 8582.89,
+    "mean": 3786.15
+  },
+  "tpot_ms": {
+    "p50": 48.23,
+    "p90": 48.97,
+    "p99": 49.57,
+    "mean": 47.15
+  },
+  "e2e_ms": {
+    "p50": 51852.3,
+    "p99": 58113.21
+  },
+  "success_rate": 1.0,
+  "peak_hbm_mb_per_npu": [
+    60742,
+    60692,
+    60699,
+    60699,
+    60701,
+    60708,
+    60697,
+    60698,
+    59719,
+    59726,
+    59718,
+    59716,
+    59718,
+    59719,
+    59712,
+    59721
+  ],
+  "avg_output_tokens_per_request": 1024.0,
+  "fallback_to_text": false,
+  "timestamp": "2026-11-12T13:50:40.641288",
+  "errors": []
+}

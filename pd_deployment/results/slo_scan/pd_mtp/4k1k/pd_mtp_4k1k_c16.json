@@ -1,0 +1,56 @@
+{
+  "case_id": "pd_mtp_4k1k_c16",
+  "input_len": 4096,
+  "output_len": 1024,
+  "concurrency": 16,
+  "temperature": 0.0,
+  "ignore_eos": true,
+  "seed": 42,
+  "planned_requests": 32,
+  "successful_requests": 32,
+  "failed_requests": 0,
+  "wall_time_s": 68.111,
+  "total_input_tokens": 131072,
+  "total_output_tokens": 32768,
+  "output_tokens_per_s": 481.1,
+  "total_tokens_per_s": 2405.48,
+  "ttft_ms": {
+    "p50": 1222.0,
+    "p90": 3387.97,
+    "p99": 3718.1,
+    "mean": 1555.58
+  },
+  "tpot_ms": {
+    "p50": 30.13,
+    "p90": 32.83,
+    "p99": 36.04,
+    "mean": 30.68
+  },
+  "e2e_ms": {
+    "p50": 32785.95,
+    "p99": 38384.89
+  },
+  "success_rate": 1.0,
+  "peak_hbm_mb_per_npu": [
+    61418,
+    61369,
+    61376,
+    61376,
+    61377,
+    61385,
+    61373,
+    61375,
+    59873,
+    59880,
+    59872,
+    59870,
+    59873,
+    59874,
+    59866,
+    59875
+  ],
+  "avg_output_tokens_per_request": 1024.0,
+  "fallback_to_text": false,
+  "timestamp": "2026-11-12T14:40:26.859078",
+  "errors": []
+}
