@@ -152,5 +152,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-    return {"deployment": deployment, "scenario": scenario,
-            "slo_concurrency": good_c, "goodput": good_tp, "points": points}
